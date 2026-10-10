@@ -16,6 +16,7 @@ export default function OfferRide() {
     time: "",
     seats: 3,
     price: 50,
+    rideType: "Own Car",
   });
 
   const handleSubmit = (e: React.FormEvent) => {
@@ -99,7 +100,7 @@ export default function OfferRide() {
             </div>
           </div>
 
-          <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+          <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
             <div>
               <label className="block text-sm font-medium text-gray-700 mb-1">Seats Available</label>
               <select
@@ -126,6 +127,20 @@ export default function OfferRide() {
                 onChange={handleChange}
                 className="w-full px-4 py-2 border border-gray-300 rounded-md focus:ring-blue-500 focus:border-blue-500 outline-none transition-all"
               />
+            </div>
+            <div>
+              <label className="block text-sm font-medium text-gray-700 mb-1">Ride Type</label>
+              <select
+                name="rideType"
+                value={formData.rideType}
+                onChange={handleChange}
+                className="w-full px-4 py-2 border border-gray-300 rounded-md focus:ring-blue-500 focus:border-blue-500 outline-none transition-all"
+              >
+                <option value="Own Car">Own Car</option>
+                <option value="Taxi">Taxi (Shared)</option>
+                <option value="Auto">Auto Rickshaw</option>
+                <option value="Bike">Bike / Scooter</option>
+              </select>
             </div>
           </div>
 

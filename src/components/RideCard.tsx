@@ -18,9 +18,10 @@ export default function RideCard({ ride, onBook, hideBookButton }: RideCardProps
         </div>
         <div className="text-gray-600 text-sm grid grid-cols-2 gap-2 mt-2">
           <p><strong>Driver:</strong> {ride.driver}</p>
+          <p><strong>Type:</strong> {ride.rideType}</p>
           <p><strong>Date:</strong> {ride.date}</p>
           <p><strong>Time:</strong> {ride.time}</p>
-          <p><strong>Seats Left:</strong> {ride.seats}</p>
+          <p className="col-span-2"><strong>Seats Left:</strong> {ride.seats}</p>
         </div>
       </div>
       

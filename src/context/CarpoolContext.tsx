@@ -11,6 +11,7 @@ export type Ride = {
   time: string;
   seats: number;
   price: number;
+  rideType: string;
   isUserDriver?: boolean;
 };
 
@@ -31,6 +32,7 @@ const initialRides: Ride[] = [
     time: "10:00",
     seats: 3,
     price: 150,
+    rideType: "Own Car",
   },
   {
     id: "2",
@@ -41,6 +43,7 @@ const initialRides: Ride[] = [
     time: "18:30",
     seats: 2,
     price: 300,
+    rideType: "Taxi",
   },
 ];
 
