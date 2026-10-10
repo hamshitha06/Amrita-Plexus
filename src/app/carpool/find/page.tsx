@@ -2,98 +2,129 @@
 
 import { useState } from "react";
 import Link from "next/link";
-import { useCarpool, Ride } from "@/context/CarpoolContext";
+import { useCarpool } from "@/context/CarpoolContext";
 import RideCard from "@/components/RideCard";
+import RideDetailsModal from "@/components/RideDetailsModal";
 
 export default function FindRide() {
-  const { rides, bookRide } = useCarpool();
+  const { rides, fetchRides, bookRide, loading } = useCarpool();
+
   const [searchParams, setSearchParams] = useState({
     source: "",
     destination: "",
+    date: "",
   });
-  const [filteredRides, setFilteredRides] = useState<Ride[]>([]);
-  const [hasSearched, setHasSearched] = useState(false);
+
+  const [selectedRideId, setSelectedRideId] = useState<string | null>(null);
 
   const handleSearch = (e: React.FormEvent) => {
     e.preventDefault();
-    setHasSearched(true);
-    
-    const results = rides.filter((ride) => {
-      const matchSource = ride.source.toLowerCase().includes(searchParams.source.toLowerCase());
-      const matchDest = ride.destination.toLowerCase().includes(searchParams.destination.toLowerCase());
-      
-      // If either search param is empty, it shouldn't filter out based on that param.
-      // But for better UX, let's just match if BOTH exist, or one exists.
-      if (searchParams.source && searchParams.destination) {
-        return matchSource && matchDest;
-      } else if (searchParams.source) {
-        return matchSource;
-      } else if (searchParams.destination) {
-        return matchDest;
-      }
-      return true; // if both empty, show all
-    });
-    
-    setFilteredRides(results);
+    fetchRides(searchParams);
+  };
+
+  const handleReset = () => {
+    setSearchParams({ source: "", destination: "", date: "" });
+    fetchRides();
   };
 
   return (
     <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
-      <div className="mb-6 flex items-center gap-4">
-        <Link href="/carpool" className="text-gray-500 hover:text-blue-600 transition-colors">
-          &larr; Back
-        </Link>
-        <h1 className="text-2xl font-bold text-gray-900">Find a Ride</h1>
+      <div className="mb-6 flex items-center justify-between">
+        <div className="flex items-center gap-4">
+          <Link href="/carpool" className="text-gray-500 hover:text-blue-600 font-semibold transition-colors">
+            &larr; Dashboard
+          </Link>
+          <h1 className="text-2xl font-bold text-gray-900">Find a Carpool</h1>
+        </div>
       </div>
 
-      <div className="bg-white rounded-lg shadow-sm border border-gray-200 p-6 mb-8">
-        <form onSubmit={handleSearch} className="flex flex-col md:flex-row gap-4 items-end">
-          <div className="flex-1 w-full">
-            <label className="block text-sm font-medium text-gray-700 mb-1">From</label>
+      {/* Search Filter Form */}
+      <div className="bg-white rounded-xl shadow-sm border border-gray-200 p-6 mb-8">
+        <form onSubmit={handleSearch} className="grid grid-cols-1 md:grid-cols-4 gap-4 items-end">
+          <div>
+            <label className="block text-xs font-semibold text-gray-700 mb-1">Origin / From</label>
             <input
               type="text"
-              placeholder="e.g. Campus"
+              placeholder="e.g. Main Gate, Campus"
               value={searchParams.source}
               onChange={(e) => setSearchParams({ ...searchParams, source: e.target.value })}
-              className="w-full px-4 py-2 border border-gray-300 rounded-md focus:ring-blue-500 focus:border-blue-500 outline-none"
+              className="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm outline-none focus:ring-2 focus:ring-blue-500"
             />
           </div>
-          <div className="flex-1 w-full">
-            <label className="block text-sm font-medium text-gray-700 mb-1">To</label>
+          <div>
+            <label className="block text-xs font-semibold text-gray-700 mb-1">Destination / To</label>
             <input
               type="text"
-              placeholder="e.g. Airport"
+              placeholder="e.g. Railway Station, Airport"
               value={searchParams.destination}
               onChange={(e) => setSearchParams({ ...searchParams, destination: e.target.value })}
-              className="w-full px-4 py-2 border border-gray-300 rounded-md focus:ring-blue-500 focus:border-blue-500 outline-none"
+              className="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm outline-none focus:ring-2 focus:ring-blue-500"
             />
           </div>
-          <button
-            type="submit"
-            className="w-full md:w-auto bg-blue-600 hover:bg-blue-700 text-white font-medium py-2 px-6 rounded-md transition-colors"
-          >
-            Search
-          </button>
+          <div>
+            <label className="block text-xs font-semibold text-gray-700 mb-1">Departure Date</label>
+            <input
+              type="date"
+              value={searchParams.date}
+              onChange={(e) => setSearchParams({ ...searchParams, date: e.target.value })}
+              className="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm outline-none focus:ring-2 focus:ring-blue-500"
+            />
+          </div>
+          <div className="flex gap-2">
+            <button
+              type="submit"
+              className="flex-1 bg-blue-600 hover:bg-blue-700 text-white font-bold py-2 px-4 rounded-lg text-sm transition-colors shadow"
+            >
+              Search
+            </button>
+            <button
+              type="button"
+              onClick={handleReset}
+              className="bg-gray-100 hover:bg-gray-200 text-gray-700 font-semibold py-2 px-4 rounded-lg text-sm border border-gray-300 transition-colors"
+            >
+              Reset
+            </button>
+          </div>
         </form>
       </div>
 
-      {hasSearched && (
-        <div>
-          <h2 className="text-lg font-semibold text-gray-800 mb-4">
-            Search Results ({filteredRides.length})
-          </h2>
-          {filteredRides.length === 0 ? (
-            <div className="text-center py-12 bg-gray-50 rounded-lg border border-gray-100">
-              <p className="text-gray-500">No rides found matching your criteria.</p>
-            </div>
-          ) : (
-            <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-              {filteredRides.map((ride) => (
-                <RideCard key={ride.id} ride={ride} onBook={bookRide} hideBookButton={ride.isUserDriver} />
-              ))}
-            </div>
-          )}
+      {/* Results Header */}
+      <div className="mb-4 flex justify-between items-center">
+        <h2 className="text-lg font-bold text-gray-800">
+          Available Rides ({rides.length})
+        </h2>
+      </div>
+
+      {loading ? (
+        <div className="text-center py-16 bg-white rounded-xl border border-gray-200">
+          <p className="text-gray-500">Searching database...</p>
         </div>
+      ) : rides.length === 0 ? (
+        <div className="text-center py-16 bg-white rounded-xl border border-gray-200 p-8">
+          <h3 className="text-base font-bold text-gray-800 mb-1">No Matching Rides Found</h3>
+          <p className="text-xs text-gray-500 mb-4">Try clearing your filters or changing your departure date.</p>
+          <button onClick={handleReset} className="bg-blue-600 text-white font-semibold py-2 px-4 rounded-lg text-xs">
+            Clear Filters
+          </button>
+        </div>
+      ) : (
+        <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+          {rides.map((ride) => (
+            <RideCard
+              key={ride.id}
+              ride={ride}
+              onBook={bookRide}
+              onViewDetails={(id) => setSelectedRideId(id)}
+            />
+          ))}
+        </div>
+      )}
+
+      {selectedRideId && (
+        <RideDetailsModal
+          rideId={selectedRideId}
+          onClose={() => setSelectedRideId(null)}
+        />
       )}
     </div>
   );
