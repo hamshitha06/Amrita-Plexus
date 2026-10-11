@@ -27,8 +27,11 @@ yarn-debug.log*
 backup-key*
 age-key*
 *.key
+backups/
+api/backups/
 
 # OS & IDE
 .DS_Store
 Thumbs.db
 .neon
+*.traineddata

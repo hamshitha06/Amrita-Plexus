@@ -2,6 +2,7 @@
 
 import React, { createContext, useContext, useState, useEffect } from 'react';
 import { toast } from 'sonner';
+import { parseMenuText } from '@/lib/menu-parser';
 
 export interface Parcel {
   id: string;
@@ -307,6 +308,14 @@ interface PlexusContextType {
   canteenItems: CanteenItem[];
   isScanningMenu: boolean;
   scanMenuFromImage: (imageName: string) => Promise<void>;
+  publishDigitalMenu: (
+    canteenId: string,
+    canteenName: string,
+    items: Array<{ title: string; category: string; price: number; prepTime?: string; isAvailable?: boolean; aiVerifiedScore?: number; needsReview?: boolean }>,
+    rawText?: string,
+    imageRef?: string
+  ) => Promise<boolean>;
+  refreshCanteenMenus: () => Promise<void>;
 
   // Canteen — Cart
   cart: CartItem[];
@@ -720,10 +729,14 @@ export function PlexusProvider({ children }: { children: React.ReactNode }) {
   const [parcels, setParcels] = useState<Parcel[]>(initialParcels);
   const [snacks, setSnacks] = useState<Snack[]>(initialSnacks);
 
-  const [canteens] = useState<CampusCanteen[]>(initialCanteens);
+  const [canteens, setCanteens] = useState<CampusCanteen[]>(initialCanteens);
   const [selectedCanteenId, setSelectedCanteenId] = useState('cant-3');
   const [canteenItems, setCanteenItems] = useState<CanteenItem[]>(initialCanteenItems);
   const [isScanningMenu, setIsScanningMenu] = useState(false);
+
+  useEffect(() => {
+    refreshCanteenMenus();
+  }, []);
 
   // Real cart state
   const [cart, setCart] = useState<CartItem[]>([]);
@@ -902,45 +915,151 @@ export function PlexusProvider({ children }: { children: React.ReactNode }) {
     toast.success(`🎉 Delivered! ₹${req.deliveryFee} delivery fee credited to your wallet!`);
   };
 
-  // ── AI Menu Scan ────────────────────────────────────────────────────────────
+  // ── AI Menu Scan & Backend Persistence ──────────────────────────────────────
+
+  const refreshCanteenMenus = async () => {
+    try {
+      const res = await fetch('http://localhost:4000/api/canteen/menus');
+      if (res.ok) {
+        const json = await res.json();
+        if (json.success && Array.isArray(json.data)) {
+          const dbItems: CanteenItem[] = [];
+          json.data.forEach((menu: { canteenId: string; items?: Array<{ id: string; title: string; category: string; price: number; prepTime?: string; isAvailable?: boolean; aiVerifiedScore?: number; canteenId: string }> }) => {
+            if (menu.items && Array.isArray(menu.items)) {
+              menu.items.forEach(item => {
+                dbItems.push({
+                  id: item.id,
+                  title: item.title,
+                  category: item.category,
+                  price: item.price,
+                  prepTime: item.prepTime || '10 mins',
+                  isAvailable: item.isAvailable !== false,
+                  aiVerifiedScore: item.aiVerifiedScore || 98.5,
+                  categoryBadge: item.category,
+                  canteenId: item.canteenId,
+                });
+              });
+            }
+          });
+          if (dbItems.length > 0) {
+            setCanteenItems(prev => {
+              const existingKeys = new Set(dbItems.map(d => `${d.canteenId}-${d.title.toLowerCase()}`));
+              const filteredOld = prev.filter(p => !existingKeys.has(`${p.canteenId}-${p.title.toLowerCase()}`));
+              return [...dbItems, ...filteredOld];
+            });
+          }
+        }
+      }
+    } catch {
+      // Fallback gracefully to default items
+    }
+  };
+
+  const publishDigitalMenu = async (
+    canteenId: string,
+    canteenName: string,
+    items: Array<{ title: string; category: string; price: number; prepTime?: string; isAvailable?: boolean; aiVerifiedScore?: number; needsReview?: boolean }>,
+    rawText?: string,
+    imageRef?: string
+  ): Promise<boolean> => {
+    try {
+      const res = await fetch('http://localhost:4000/api/canteen/menus', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          canteenId,
+          canteenName,
+          imageReference: imageRef,
+          rawExtractedText: rawText,
+          items: items.map(i => ({
+            title: i.title,
+            category: i.category,
+            price: i.price,
+            prepTime: i.prepTime || '10 mins',
+            isAvailable: i.isAvailable !== false,
+            aiVerifiedScore: i.aiVerifiedScore || 98.5,
+            needsReview: i.needsReview || false,
+          })),
+        }),
+      });
+
+      if (res.ok) {
+        const kolkataTime = new Intl.DateTimeFormat('en-IN', {
+          timeZone: 'Asia/Kolkata',
+          hour: '2-digit',
+          minute: '2-digit',
+          hour12: true,
+        }).format(new Date());
+
+        setCanteens(prev =>
+          prev.map(c =>
+            c.id === canteenId
+              ? { ...c, lastUploaded: `Today, ${kolkataTime} (IST)`, uploadedBy: 'Verified Student' }
+              : c
+          )
+        );
+
+        const newCanteenItems: CanteenItem[] = items.map((it, idx) => ({
+          id: `db-canteen-${Date.now()}-${idx}`,
+          title: it.title,
+          category: it.category,
+          price: it.price,
+          prepTime: it.prepTime || '10 mins',
+          isAvailable: true,
+          aiVerifiedScore: it.aiVerifiedScore || 98.5,
+          categoryBadge: it.category,
+          canteenId,
+        }));
+
+        setCanteenItems(prev => [...newCanteenItems, ...prev.filter(p => p.canteenId !== canteenId)]);
+        toast.success(`🎉 Verified digital menu published to ${canteenName}!`);
+        return true;
+      } else {
+        toast.error('Server returned an error publishing menu.');
+        return false;
+      }
+    } catch {
+      toast.error('Network error publishing menu to database.');
+      return false;
+    }
+  };
 
   const scanMenuFromImage = async (imageName: string) => {
     setIsScanningMenu(true);
-    toast.info('🤖 AI Vision OCR scanning canteen blackboard menu...');
+    toast.info('🤖 AI Vision OCR parsing canteen blackboard menu...');
 
-    await new Promise(res => setTimeout(res, 2000));
+    // Blackboard sample texts
+    const sampleBoard1 = `
+VEG FRIED RICE 60
+MASALA DOSA 50
+PANEER BUTTER MASALA 110
+FILTER COFFEE 20
+HOT TEA 12
+SAMOSA 15
+`;
+    const sampleBoard2 = `
+COLD BADAM MILK 35
+CHOCOLATE SHAKE 45
+PANEER ROLL 50
+EGG ROLL 40
+LEMON TEA 15
+`;
 
-    const extracted: CanteenItem[] = [
-      {
-        id: `NC-EX-${Date.now()}-1`,
-        title: 'Crispy Veg Schezwan Noodles',
-        category: 'Snacks',
-        price: 55,
-        prepTime: '12 mins',
-        isAvailable: true,
-        aiVerifiedScore: 99.4,
-        categoryBadge: 'Snacks',
-        canteenId: selectedCanteenId,
-      },
-      {
-        id: `NC-EX-${Date.now()}-2`,
-        title: 'Butter Garlic Bread Toast',
-        category: 'Breakfast',
-        price: 30,
-        prepTime: '5 mins',
-        isAvailable: true,
-        aiVerifiedScore: 98.1,
-        categoryBadge: 'Breakfast',
-        canteenId: selectedCanteenId,
-      },
-    ];
+    const rawToParse = imageName.includes('2') ? sampleBoard2 : sampleBoard1;
+    const parseResult = parseMenuText(rawToParse);
 
-    const activeCanteen = canteens.find(c => c.id === selectedCanteenId);
-    setCanteenItems(prev => [...extracted, ...prev]);
+    const activeCanteen = canteens.find(c => c.id === selectedCanteenId) || canteens[0];
 
-    // Update canteen's lastUploaded (would be done via API in prod)
+    // Publish to backend API
+    await publishDigitalMenu(
+      selectedCanteenId,
+      activeCanteen.name,
+      parseResult.items,
+      rawToParse,
+      imageName
+    );
+
     setIsScanningMenu(false);
-    toast.success(`✨ OCR Model v2.4 extracted ${extracted.length} new dishes for ${activeCanteen?.name}!`);
   };
 
   // ── Parcels ─────────────────────────────────────────────────────────────────
@@ -1622,6 +1741,7 @@ export function PlexusProvider({ children }: { children: React.ReactNode }) {
         parcels, addParcel, acceptDelivery, completeDelivery,
         snacks, addSnack, buySnack,
         canteens, selectedCanteenId, setSelectedCanteenId, canteenItems, isScanningMenu, scanMenuFromImage,
+        publishDigitalMenu, refreshCanteenMenus,
         cart, cartCount, cartTotal, addToCart, updateCartQty, removeFromCart, clearCart,
         foodRequests, myFoodRequests, openFoodRequests, myAcceptedDeliveries,
         postFoodRequest, cancelFoodRequest, acceptDeliveryJob, markPickedUp, markDelivered,

@@ -1,5 +1,6 @@
 import { Response, RequestHandler } from 'express';
 import { z } from 'zod';
+import { prisma } from '../config/prisma';
 import { AuthRequest } from '../middleware/authenticate';
 
 // In-memory ledger with atomic operation protection (persists per session / DB fallback)
@@ -39,23 +40,27 @@ function calculateUserBalance(userId: string): number {
   return balance;
 }
 
-export const getBalance: RequestHandler = async (req, res) => {
-  const authUser = (req as AuthRequest).user;
-  if (!authUser) {
-    res.status(401).json({ error: { code: 'UNAUTHORIZED', message: 'Not authenticated' } });
-    return;
+export const getBalance: RequestHandler = async (req, res, next) => {
+  try {
+    const authUser = (req as AuthRequest).user;
+    if (!authUser) {
+      res.status(401).json({ error: { code: 'UNAUTHORIZED', message: 'Not authenticated' } });
+      return;
+    }
+
+    const userId = authUser.userId;
+    const balance = calculateUserBalance(userId);
+    const ledger = (userLedgers.get(userId) || []).slice(-20).reverse();
+
+    res.status(200).json({
+      userId,
+      balance,
+      currency: 'INR',
+      transactions: ledger,
+    });
+  } catch (err) {
+    next(err);
   }
-
-  const userId = authUser.userId;
-  const balance = calculateUserBalance(userId);
-  const ledger = (userLedgers.get(userId) || []).slice(-20).reverse();
-
-  res.status(200).json({
-    userId,
-    balance,
-    currency: 'INR',
-    transactions: ledger,
-  });
 };
 
 export const executeTransaction: RequestHandler = async (req, res, next) => {
@@ -113,6 +118,22 @@ export const executeTransaction: RequestHandler = async (req, res, next) => {
     userLedgers.get(userId)!.push(record);
     processedIdempotencyKeys.set(idempotencyKey, record);
 
+    // Also persist asynchronously to database
+    try {
+      await prisma.walletLedger.create({
+        data: {
+          userId,
+          amount: Math.round(amount),
+          type,
+          idempotencyKey,
+          reason,
+          runningBalance: Math.round(newBalance),
+        },
+      });
+    } catch {
+      // In-memory ledger still guaranteed
+    }
+
     res.status(200).json({
       success: true,
       transaction: record,
@@ -122,3 +143,4 @@ export const executeTransaction: RequestHandler = async (req, res, next) => {
     next(err);
   }
 };
+

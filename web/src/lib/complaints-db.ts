@@ -1,5 +1,5 @@
 import crypto from 'crypto';
-import { prisma } from './prisma.ts';
+import { prisma } from './prisma';
 
 export type ComplaintStatus = 'Submitted' | 'Under Review' | 'Assigned' | 'In Progress' | 'Resolved' | 'Closed';
 export type ComplaintCategory = 'Hostel' | 'Mess and Food' | 'Infrastructure' | 'Academics' | 'Transport' | 'Campus Facilities' | 'Internet and Technology' | 'Other';
