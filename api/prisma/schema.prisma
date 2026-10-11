@@ -63,3 +63,482 @@ model AuthToken {
   @@index([tokenHash])
   @@map("auth_tokens")
 }
+
+// ==============================================================================
+// AUDIT LOGS
+// ==============================================================================
+model AuditLog {
+  id         String   @id @default(uuid())
+  actorId    String?
+  action     String
+  entityType String
+  entityId   String
+  ip         String?
+  userAgent  String?
+  metadata   Json?
+  createdAt  DateTime @default(now())
+
+  @@index([entityType, entityId])
+  @@index([actorId])
+  @@map("audit_logs")
+}
+
+// ==============================================================================
+// SERVICE REQUESTS
+// ==============================================================================
+model ServiceRequest {
+  id                 String   @id @default(uuid())
+  requestNumber      String   @unique
+  serviceId          String?
+  serviceTitle       String
+  requesterId        String?
+  requesterName      String
+  requesterHostel    String?
+  requesterPhone     String?
+  providerId         String?
+  providerName       String
+  providerHostel     String?
+  providerPhone      String?
+  appointmentDate    String
+  customerNotes      String
+  price              Int
+  pricingModel       String
+  status             String   @default("Pending") // Pending, Accepted, In Progress, Completed, Cancelled, Rejected
+  cancellationReason String?
+  reviewedScore      Int?
+  requestedAt        DateTime @default(now())
+  updatedAt          DateTime @updatedAt
+
+  statusLogs         ServiceRequestStatusLog[]
+
+  @@index([requesterId])
+  @@index([providerId])
+  @@index([status])
+  @@map("service_requests")
+}
+
+model ServiceRequestStatusLog {
+  id               String         @id @default(uuid())
+  serviceRequestId String
+  previousStatus   String
+  newStatus        String
+  changedBy        String
+  reason           String?
+  createdAt        DateTime       @default(now())
+
+  serviceRequest   ServiceRequest @relation(fields: [serviceRequestId], references: [id], onDelete: Cascade)
+
+  @@index([serviceRequestId])
+  @@map("service_request_status_logs")
+}
+
+// ==============================================================================
+// COMPLAINTS & IMPROVEMENTS
+// ==============================================================================
+model ComplaintTicket {
+  id              String   @id @default(uuid())
+  ticketId        String   @unique // e.g. TKT-1234-ABCD
+  requesterId     String?  // Authenticated user ID (hidden from public/non-admin)
+  type            String   // Complaint | Improvement
+  category        String   // Hostel, Mess and Food, Infrastructure, Academics, Transport, Campus Facilities, Internet and Technology, Other
+  subject         String
+  description     String
+  evidenceFiles   String[] @default([])
+  status          String   @default("Submitted") // Submitted, Under Review, Assigned, In Progress, Resolved, Closed, Rejected
+  secretHash      String   // SHA-256 hash of 32-character tracking secret
+  assignedTo      String?
+  rating          Int?
+  feedbackComment String?
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+  resolvedAt      DateTime?
+
+  logs            ComplaintTicketLog[]
+  attachments     ComplaintTicketAttachment[]
+
+  @@index([requesterId])
+  @@index([ticketId])
+  @@index([status])
+  @@map("complaint_tickets")
+}
+
+model ComplaintTicketLog {
+  id             String          @id @default(uuid())
+  ticketId       String
+  actorId        String?
+  actionType     String
+  previousStatus String?
+  newStatus      String?
+  comment        String
+  visibility     String          @default("PUBLIC") // PUBLIC | INTERNAL
+  createdAt      DateTime        @default(now())
+
+  ticket         ComplaintTicket @relation(fields: [ticketId], references: [ticketId], onDelete: Cascade)
+
+  @@index([ticketId])
+  @@map("complaint_ticket_logs")
+}
+
+model ComplaintTicketAttachment {
+  id            String          @id @default(uuid())
+  ticketId      String
+  uploadedBy    String?
+  fileReference String
+  createdAt     DateTime        @default(now())
+
+  ticket        ComplaintTicket @relation(fields: [ticketId], references: [ticketId], onDelete: Cascade)
+
+  @@index([ticketId])
+  @@map("complaint_ticket_attachments")
+}
+
+// ==============================================================================
+// LOST & FOUND (PHYSICAL SECURITY CUSTODY — NO LOCKERS)
+// ==============================================================================
+model LostFoundItem {
+  id                         String   @id @default(uuid())
+  reportType                 String   // LOST | FOUND
+  title                      String
+  category                   String
+  publicDescription          String
+  privateVerificationDetails String?
+  location                   String
+  eventDate                  String
+  eventTime                  String?
+  photoUrl                   String?
+  reporterId                 String?
+  reporterName               String
+  reporterEmail              String
+  securityLevel              Int      @default(1) // 1 to 5
+  status                     String   @default("Reported")
+  // Possible statuses:
+  // Reported, Handover Reported, Custody Confirmed, Claim Under Review, Approved for Handover, Returned, Closed
+  createdAt                  DateTime @default(now())
+  updatedAt                  DateTime @updatedAt
+
+  custodyRecords             ItemCustodyRecord[]
+  claims                     OwnershipClaim[]
+  activityLogs               LostFoundActivityLog[]
+
+  @@index([reportType])
+  @@index([status])
+  @@index([reporterId])
+  @@map("lost_found_items")
+}
+
+model ItemCustodyRecord {
+  id                   String        @id @default(uuid())
+  itemId               String
+  custodyLocation      String        // e.g. "Main Gate Security Desk", "AB-3 Ground Floor Security Office", etc. (NO LOCKERS)
+  reportedHandoverAt   DateTime?
+  confirmedHandoverAt  DateTime?
+  confirmedBy          String?       // Security Officer or Authorized Representative
+  secondaryOfficer     String?       // For Level 5 Dual-Staff custody
+  conditionNotes       String?
+  custodyStatus        String        @default("Handover Reported") // Handover Reported | Custody Confirmed | Returned
+  handoverOtpHash      String?
+  recipientName        String?
+  returnedAt           DateTime?
+  createdAt            DateTime      @default(now())
+  updatedAt            DateTime      @updatedAt
+
+  item                 LostFoundItem @relation(fields: [itemId], references: [id], onDelete: Cascade)
+
+  @@index([itemId])
+  @@index([custodyStatus])
+  @@map("item_custody_records")
+}
+
+model OwnershipClaim {
+  id                  String        @id @default(uuid())
+  itemId              String
+  claimantId          String?
+  claimantName        String
+  claimantEmail       String
+  privateClaimDetails Json          // Array of { question, answer }
+  evidencePhotoUrl    String?
+  additionalNotes     String?
+  advisoryScore       Int?
+  status              String        @default("Under Review") // Under Review | Approved | Rejected | Disputed | Returned
+  reviewedBy          String?
+  reviewedAt          DateTime?
+  createdAt           DateTime      @default(now())
+  updatedAt           DateTime      @updatedAt
+
+  item                LostFoundItem @relation(fields: [itemId], references: [id], onDelete: Cascade)
+
+  @@index([itemId])
+  @@index([claimantId])
+  @@index([status])
+  @@map("ownership_claims")
+}
+
+model LostFoundActivityLog {
+  id             String        @id @default(uuid())
+  itemId         String
+  actorId        String?
+  actorName      String?
+  action         String
+  previousStatus String?
+  newStatus      String?
+  remarks        String?
+  visibility     String        @default("PUBLIC") // PUBLIC | INTERNAL
+  createdAt      DateTime      @default(now())
+
+  item           LostFoundItem @relation(fields: [itemId], references: [id], onDelete: Cascade)
+
+  @@index([itemId])
+  @@map("lost_found_activity_logs")
+}
+
+// ==============================================================================
+// CANTEEN & PEER-TO-PEER FOOD DELIVERY
+// ==============================================================================
+model CanteenMenu {
+  id              String            @id @default(uuid())
+  canteenId       String            // cant-1 (Main Canteen), cant-2 (IT Block Canteen), cant-3 (MBA Canteen)
+  canteenName     String
+  uploaderId      String?
+  uploaderName    String
+  imageReference  String?           // Local storage / image ref
+  rawExtractedText String?          // Full OCR recognized text
+  publishedAt     DateTime          @default(now())
+  updatedAt       DateTime          @updatedAt
+  reviewStatus    String            @default("PUBLISHED") // DRAFT | VERIFIED | PUBLISHED
+  isCurrent       Boolean           @default(true)
+
+  items           CanteenMenuItem[]
+
+  @@index([canteenId])
+  @@index([publishedAt])
+  @@map("canteen_menus")
+}
+
+model CanteenMenuItem {
+  id              String      @id @default(uuid())
+  menuId          String
+  canteenId       String
+  title           String
+  category        String      // Beverages, Snacks, Breakfast, Lunch, Desserts
+  price           Int
+  prepTime        String      @default("5-10 mins")
+  isAvailable     Boolean     @default(true)
+  aiVerifiedScore Float       @default(98.0)
+  needsReview     Boolean     @default(false)
+  createdAt       DateTime    @default(now())
+  updatedAt       DateTime    @updatedAt
+
+  menu            CanteenMenu @relation(fields: [menuId], references: [id], onDelete: Cascade)
+
+  @@index([canteenId])
+  @@index([menuId])
+  @@map("canteen_menu_items")
+}
+
+model FoodRequest {
+  id              String   @id @default(uuid())
+  requestNumber   String   @unique
+  requesterId     String?
+  requesterName   String
+  requesterRoom   String
+  canteenId       String
+  canteenName     String
+  canteenLocation String
+  items           Json     // Array of { title, price, quantity }
+  deliveryAddress String
+  instructions    String?
+  foodSubtotal    Int
+  deliveryFee     Int
+  totalAmount     Int
+  status          String   @default("Open") // Open, Accepted, Picked Up, Delivered, Cancelled
+  delivererId     String?
+  delivererName   String?
+  postedAt        DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+  completedAt     DateTime?
+
+  @@index([canteenId])
+  @@index([status])
+  @@index([requesterId])
+  @@map("food_requests")
+}
+
+// ==============================================================================
+// CARPOOLING
+// ==============================================================================
+model CarpoolRide {
+  id              String           @id @default(uuid())
+  origin          String
+  destination     String
+  driverId        String?
+  driverName      String
+  driverRole      String           @default("Student")
+  vehicleType     String
+  date            String           // YYYY-MM-DD
+  time            String           // HH:MM
+  availableSeats  Int
+  totalSeats      Int
+  pricePerSeat    Int
+  status          String           @default("AVAILABLE") // AVAILABLE | FULL | CANCELLED | COMPLETED
+  createdAt       DateTime         @default(now())
+  updatedAt       DateTime         @updatedAt
+
+  bookings        CarpoolBooking[]
+
+  @@index([status])
+  @@index([driverId])
+  @@index([date])
+  @@map("carpool_rides")
+}
+
+model CarpoolBooking {
+  id              String      @id @default(uuid())
+  rideId          String
+  passengerId     String?
+  passengerName   String
+  seatsBooked     Int         @default(1)
+  totalPrice      Int
+  status          String      @default("ACCEPTED") // PENDING | ACCEPTED | CANCELLED
+  createdAt       DateTime    @default(now())
+  updatedAt       DateTime    @updatedAt
+
+  ride            CarpoolRide @relation(fields: [rideId], references: [id], onDelete: Cascade)
+
+  @@index([rideId])
+  @@index([passengerId])
+  @@map("carpool_bookings")
+}
+
+// ==============================================================================
+// PARCELS & PEER DELIVERY
+// ==============================================================================
+model ParcelDelivery {
+  id                String   @id @default(uuid())
+  trackingNumber    String   @unique
+  courier           String
+  arrivalGate       String
+  destinationHostel String
+  destinationRoom   String
+  recipientId       String?
+  recipientName     String
+  delivererId       String?
+  delivererName     String?
+  reward            Int
+  deliveryOtpHash   String   // Hashed OTP for delivery verification
+  status            String   @default("Awaiting Delivery") // Awaiting Delivery | In Transit | Delivered | Cancelled
+  amazonLink        String?
+  weightEstimate    String?
+  createdAt         DateTime @default(now())
+  updatedAt         DateTime @updatedAt
+  deliveredAt       DateTime?
+
+  @@index([recipientId])
+  @@index([status])
+  @@index([trackingNumber])
+  @@map("parcel_deliveries")
+}
+
+// ==============================================================================
+// MARKETPLACE (BUY & SELL)
+// ==============================================================================
+model MarketplaceListing {
+  id             String   @id @default(uuid())
+  title          String
+  category       String
+  condition      String   // Brand New, Like New, Fair, Used
+  sellingPrice   Int
+  originalPrice  Int?
+  pickupLocation String
+  description    String
+  sellerId       String?
+  sellerName     String
+  sellerRating   Float    @default(5.0)
+  status         String   @default("Available") // Available | Reserved | Sold
+  photoUrl       String?
+  createdAt      DateTime @default(now())
+  updatedAt      DateTime @updatedAt
+
+  @@index([status])
+  @@index([category])
+  @@index([sellerId])
+  @@map("marketplace_listings")
+}
+
+// ==============================================================================
+// HOSTEL, MESS & SNACKS
+// ==============================================================================
+model MessMenuSchedule {
+  id          String   @id @default(uuid())
+  hostelName  String   // e.g. "Gargi Hostel", "Vasishta Hostel"
+  dayOfWeek   String   // Monday .. Sunday
+  mealType    String   // Breakfast, Lunch, Snacks, Dinner
+  menuItems   String[]
+  updatedBy   String
+  updatedAt   DateTime @updatedAt
+
+  @@unique([hostelName, dayOfWeek, mealType])
+  @@map("mess_menu_schedules")
+}
+
+model HostelSnackItem {
+  id             String   @id @default(uuid())
+  title          String
+  category       String
+  price          Int
+  sellerName     String
+  pickupLocation String
+  availableQty   Int      @default(1)
+  isAvailable    Boolean  @default(true)
+  createdAt      DateTime @default(now())
+  updatedAt      DateTime @updatedAt
+
+  @@map("hostel_snack_items")
+}
+
+model HostelPost {
+  id         String   @id @default(uuid())
+  author     String
+  roleInfo   String
+  badgeText  String?
+  badgeType  String?  // notice | official | student
+  channel    String   @default("general-discussion") // general-discussion | mess-updates | announcements
+  content    String
+  isNotice   Boolean  @default(false)
+  createdAt  DateTime @default(now())
+
+  @@index([channel])
+  @@map("hostel_posts")
+}
+
+// ==============================================================================
+// WALLET & TRUST SCORE LEDGER
+// ==============================================================================
+model WalletLedger {
+  id             String   @id @default(uuid())
+  userId         String
+  amount         Int
+  type           String   // CREDIT | DEBIT | ESCROW_HOLD | ESCROW_RELEASE
+  idempotencyKey String   @unique
+  reason         String
+  runningBalance Int
+  createdAt      DateTime @default(now())
+
+  @@index([userId])
+  @@index([idempotencyKey])
+  @@map("wallet_ledger")
+}
+
+model TrustScoreRecord {
+  id             String   @id @default(uuid())
+  userId         String
+  serviceModule  String   // Carpooling, Canteen, Parcels, LostFound, Services, Marketplace
+  eventType      String   // COMPLETED_DELIVERY, RETURNED_ITEM, VERIFIED_RIDE, POSITIVE_REVIEW
+  scoreDelta     Float
+  evidenceRef    String?  // Reference ID (e.g. deliveryId, itemId, bookingId)
+  reviewerId     String?
+  createdAt      DateTime @default(now())
+
+  @@unique([userId, serviceModule, evidenceRef, eventType]) // Prevent duplicate trust events
+  @@index([userId])
+  @@map("trust_score_records")
+}

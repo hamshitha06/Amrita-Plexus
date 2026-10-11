@@ -2,6 +2,7 @@
 
 import { useState, FormEvent } from "react";
 import Link from "next/link";
+import { useAuth } from "@/contexts/AuthContext";
 
 type ComplaintType = "Complaint" | "Improvement";
 type Category = "Hostel" | "Mess and Food" | "Infrastructure" | "Academics" | "Transport" | "Campus Facilities" | "Internet and Technology" | "Other";
@@ -17,6 +18,7 @@ interface SubmitResult {
 }
 
 export default function NewComplaintPage() {
+  const { user } = useAuth();
   const [type, setType] = useState<ComplaintType>("Complaint");
   const [category, setCategory] = useState<Category>("Hostel");
   const [subject, setSubject] = useState("");
@@ -54,7 +56,14 @@ export default function NewComplaintPage() {
     setErrorMsg("");
 
     try {
-      const body = { type, category, subject: subject.trim(), description: description.trim(), evidenceFiles: evidenceFileName ? [evidenceFileName] : [] };
+      const body = {
+        type,
+        category,
+        subject: subject.trim(),
+        description: description.trim(),
+        evidenceFiles: evidenceFileName ? [evidenceFileName] : [],
+        requesterId: user?.id,
+      };
       const res = await fetch("/api/complaints", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) });
       if (!res.ok) { const d = await res.json(); throw new Error(d.error || "Submission failed"); }
       const data: SubmitResult = await res.json();
@@ -108,12 +117,15 @@ export default function NewComplaintPage() {
               <span className="text-sm text-slate-700">I have saved my Ticket ID and Tracking Secret in a safe place.</span>
             </label>
 
-            <div className="flex gap-3 pt-2">
-              <Link href="/complaints/track" className={`flex-1 text-center py-3 rounded-xl font-bold text-sm transition ${acknowledged ? "bg-amber-600 hover:bg-amber-700 text-white shadow-sm" : "bg-slate-100 text-slate-400 cursor-not-allowed pointer-events-none"}`}>
-                Track This Ticket
+            <div className="grid grid-cols-1 sm:grid-cols-3 gap-2.5 pt-2">
+              <Link href="/complaints/my-tickets" className="text-center py-3 rounded-xl font-bold text-xs bg-indigo-600 hover:bg-indigo-700 text-white shadow-xs transition">
+                📋 View in My Tickets
               </Link>
-              <Link href="/complaints" className="flex-1 text-center py-3 rounded-xl font-bold text-sm bg-slate-100 hover:bg-slate-200 text-slate-700 transition">
-                Submit Another
+              <Link href="/complaints/track" className={`text-center py-3 rounded-xl font-bold text-xs transition ${acknowledged ? "bg-amber-600 hover:bg-amber-700 text-white shadow-xs" : "bg-slate-100 text-slate-400 cursor-not-allowed pointer-events-none"}`}>
+                🔍 Track with Secret
+              </Link>
+              <Link href="/complaints" className="text-center py-3 rounded-xl font-bold text-xs bg-slate-100 hover:bg-slate-200 text-slate-700 transition">
+                ➕ Submit Another
               </Link>
             </div>
           </div>

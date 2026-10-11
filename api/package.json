@@ -10,6 +10,10 @@
     "db:migrate": "prisma migrate dev",
     "db:generate": "prisma generate",
     "db:studio": "prisma studio",
+    "backup:create": "tsx scripts/backup-db.ts",
+    "backup:verify": "tsx scripts/verify-backup.ts",
+    "backup:restore": "tsx scripts/restore-db.ts",
+    "backup:test-restore": "tsx scripts/restore-db.ts --isolated-test",
     "test": "vitest run"
   },
   "dependencies": {

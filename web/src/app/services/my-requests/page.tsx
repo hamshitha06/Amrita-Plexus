@@ -2,17 +2,29 @@
 
 import React, { useState } from 'react';
 import Link from 'next/link';
-import { Plus, MapPin, Phone, Calendar, Star, FileText } from 'lucide-react';
+import { Plus, MapPin, Phone, Calendar, Star, FileText, AlertTriangle, X } from 'lucide-react';
 import { AppLayout } from '@/components/layout/AppLayout';
-import { usePlexus } from '@/contexts/PlexusContext';
+import { usePlexus, ServiceRequest } from '@/contexts/PlexusContext';
 
 export default function MyServiceRequestsPage() {
-  const { serviceRequests } = usePlexus();
+  const { serviceRequests, cancelServiceRequest } = usePlexus();
   const [filter, setFilter] = useState('All');
+  const [cancellingRequest, setCancellingRequest] = useState<ServiceRequest | null>(null);
+  const [cancellationReason, setCancellationReason] = useState('');
+  const [isSubmittingCancel, setIsSubmittingCancel] = useState(false);
 
   const filters = ['All', 'Pending', 'Accepted', 'In Progress', 'Completed', 'Cancelled'];
 
   const filteredRequests = serviceRequests.filter(req => filter === 'All' || req.status === filter);
+
+  const handleConfirmCancel = async () => {
+    if (!cancellingRequest) return;
+    setIsSubmittingCancel(true);
+    await cancelServiceRequest(cancellingRequest.id, cancellationReason);
+    setIsSubmittingCancel(false);
+    setCancellingRequest(null);
+    setCancellationReason('');
+  };
 
   return (
     <AppLayout
@@ -29,7 +41,7 @@ export default function MyServiceRequestsPage() {
             </div>
             <h2 className="text-3xl font-black text-slate-900 tracking-tight">My Service Requests</h2>
             <p className="text-sm text-slate-500 font-medium mt-1">
-              Track request statuses, appointment schedules, provider notes, and submit reviews.
+              Track request statuses, appointment schedules, provider notes, and cancel or review bookings.
             </p>
           </div>
           <Link 
@@ -71,6 +83,8 @@ export default function MyServiceRequestsPage() {
                 <div className={`px-3 py-1 rounded-full text-[10px] font-bold border ${
                   req.status === 'Completed' ? 'bg-emerald-50 text-emerald-700 border-emerald-200' :
                   req.status === 'Pending' ? 'bg-amber-50 text-amber-700 border-amber-200' :
+                  req.status === 'Cancelled' ? 'bg-rose-50 text-rose-700 border-rose-200' :
+                  req.status === 'Rejected' ? 'bg-slate-100 text-slate-700 border-slate-300' :
                   'bg-blue-50 text-blue-700 border-blue-200'
                 }`}>
                   Status: {req.status}
@@ -84,18 +98,26 @@ export default function MyServiceRequestsPage() {
                 <div className="md:col-span-2 space-y-4">
                   <h3 className="text-xl font-black text-slate-900">{req.serviceTitle}</h3>
                   
-                  <div className="bg-slate-50 rounded-xl p-3 text-sm text-slate-700 font-medium italic border border-slate-100">
-                    "{req.customerNotes}"
-                  </div>
+                  {req.customerNotes && (
+                    <div className="bg-slate-50 rounded-xl p-3 text-sm text-slate-700 font-medium italic border border-slate-100">
+                      "{req.customerNotes}"
+                    </div>
+                  )}
+
+                  {req.cancellationReason && (
+                    <div className="bg-rose-50/70 border border-rose-200/80 rounded-xl p-3 text-xs text-rose-800 font-medium">
+                      <span className="font-bold">Cancellation Reason:</span> {req.cancellationReason}
+                    </div>
+                  )}
 
                   <div className="flex flex-wrap items-center gap-4 text-xs font-bold text-slate-600 pt-2">
                     <div className="flex items-center gap-1.5">
                       <MapPin className="w-3.5 h-3.5 text-rose-500" />
-                      Hostel 4 Room 201
+                      {req.providerHostel || 'Campus'}
                     </div>
                     <div className="flex items-center gap-1.5">
                       <Phone className="w-3.5 h-3.5 text-blue-500" />
-                      +91 98765 43211
+                      {req.providerPhone || '+91 98765 43210'}
                     </div>
                   </div>
                 </div>
@@ -110,7 +132,7 @@ export default function MyServiceRequestsPage() {
                   </div>
 
                   <div className="pt-3 border-t border-slate-200/60">
-                    <p className="text-[10px] font-bold text-slate-400 uppercase mb-1">1st Scheduled Appointment</p>
+                    <p className="text-[10px] font-bold text-slate-400 uppercase mb-1">Scheduled Appointment</p>
                     <div className="flex items-center gap-1.5 font-bold text-xs text-slate-800">
                       <Calendar className="w-3.5 h-3.5 text-blue-500" />
                       {req.appointmentDate}
@@ -137,8 +159,22 @@ export default function MyServiceRequestsPage() {
                       Leave Review
                     </button>
                   )
+                ) : req.status === 'Cancelled' ? (
+                  <span className="text-xs font-bold text-rose-600 px-3 py-1.5 bg-rose-50 rounded-lg border border-rose-100">
+                    Request Cancelled
+                  </span>
+                ) : req.status === 'Rejected' ? (
+                  <span className="text-xs font-bold text-slate-500 px-3 py-1.5 bg-slate-100 rounded-lg">
+                    Provider Declined
+                  </span>
                 ) : (
-                  <button className="px-4 py-2 bg-slate-100 hover:bg-slate-200 text-slate-700 rounded-lg text-xs font-bold transition-all">
+                  <button 
+                    onClick={() => {
+                      setCancellingRequest(req);
+                      setCancellationReason('');
+                    }}
+                    className="px-4 py-2 bg-rose-50 hover:bg-rose-100 text-rose-700 border border-rose-200/80 rounded-lg text-xs font-bold transition-all shadow-2xs"
+                  >
                     Cancel Request
                   </button>
                 )}
@@ -155,6 +191,63 @@ export default function MyServiceRequestsPage() {
         </div>
 
       </div>
+
+      {/* Cancel Confirmation Modal */}
+      {cancellingRequest && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/60 backdrop-blur-xs p-4">
+          <div className="bg-white rounded-2xl border border-slate-200 shadow-xl max-w-md w-full overflow-hidden animate-in fade-in zoom-in duration-150">
+            <div className="p-5 border-b border-slate-100 flex items-center justify-between">
+              <div className="flex items-center gap-2 text-rose-600">
+                <AlertTriangle className="w-5 h-5" />
+                <h3 className="font-extrabold text-slate-900 text-base">Cancel Service Request</h3>
+              </div>
+              <button 
+                onClick={() => setCancellingRequest(null)}
+                className="text-slate-400 hover:text-slate-600 p-1 rounded-lg"
+              >
+                <X className="w-4 h-4" />
+              </button>
+            </div>
+
+            <div className="p-5 space-y-4">
+              <p className="text-xs text-slate-600">
+                Are you sure you want to cancel your request for <strong className="text-slate-900">{cancellingRequest.serviceTitle}</strong>? The provider will be notified.
+              </p>
+
+              <div>
+                <label className="block text-[11px] font-bold text-slate-600 uppercase mb-1">
+                  Reason for Cancellation (Optional)
+                </label>
+                <textarea
+                  value={cancellationReason}
+                  onChange={(e) => setCancellationReason(e.target.value)}
+                  placeholder="e.g., Schedule conflict, resolved independently..."
+                  rows={3}
+                  className="w-full text-xs p-3 rounded-xl border border-slate-200 focus:outline-hidden focus:ring-2 focus:ring-rose-500/20 focus:border-rose-500 transition-all resize-none"
+                />
+              </div>
+            </div>
+
+            <div className="p-4 bg-slate-50 border-t border-slate-100 flex items-center justify-end gap-3">
+              <button
+                type="button"
+                onClick={() => setCancellingRequest(null)}
+                className="px-4 py-2 text-xs font-bold text-slate-600 hover:bg-slate-200/60 rounded-xl transition-all"
+              >
+                Keep Request
+              </button>
+              <button
+                type="button"
+                onClick={handleConfirmCancel}
+                disabled={isSubmittingCancel}
+                className="px-5 py-2 text-xs font-bold text-white bg-rose-600 hover:bg-rose-700 disabled:opacity-50 rounded-xl transition-all shadow-xs"
+              >
+                {isSubmittingCancel ? 'Cancelling...' : 'Confirm Cancellation'}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </AppLayout>
   );
 }

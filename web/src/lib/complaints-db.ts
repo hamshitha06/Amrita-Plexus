@@ -1,5 +1,5 @@
-// Mock In-Memory Database for Complaints & Improvements (Demo Data)
 import crypto from 'crypto';
+import { prisma } from './prisma';
 
 export type ComplaintStatus = 'Submitted' | 'Under Review' | 'Assigned' | 'In Progress' | 'Resolved' | 'Closed';
 export type ComplaintCategory = 'Hostel' | 'Mess and Food' | 'Infrastructure' | 'Academics' | 'Transport' | 'Campus Facilities' | 'Internet and Technology' | 'Other';
@@ -13,20 +13,22 @@ export interface ComplaintUpdate {
 
 export interface Complaint {
   ticketId: string; // Public ticket number e.g. TKT-1234
-  secretHash: string; // The cryptographic SHA-256 hash of the tracking secret
+  secretHash: string; // Cryptographic SHA-256 hash of the tracking secret
+  requesterId?: string; // Student ID (private / authenticated)
   type: 'Complaint' | 'Improvement';
   category: ComplaintCategory;
   subject: string;
   description: string;
-  evidenceFiles: string[]; // URLs or file names (mocked)
+  evidenceFiles: string[];
   status: ComplaintStatus;
   createdAt: string;
   updates: ComplaintUpdate[];
   rating?: number; // 1-5 feedback rating
   feedbackComment?: string;
+  assignedTo?: string;
 }
 
-// Global variable to persist across hot reloads in dev (Next.js)
+// Global variable to persist in-memory across hot reloads in dev (Next.js) & unit tests
 const globalForComplaints = global as unknown as { complaintsDb: Complaint[] };
 export const complaintsDb: Complaint[] = globalForComplaints.complaintsDb || [];
 if (process.env.NODE_ENV !== 'production') globalForComplaints.complaintsDb = complaintsDb;
@@ -48,14 +50,15 @@ export function generateTrackingSecret(): string {
   return crypto.randomBytes(16).toString('hex');
 }
 
-// API Functions
+// ── Synchronous API (for backwards-compatibility & instant unit test execution) ──
 
 export function submitComplaint(
   type: 'Complaint' | 'Improvement',
   category: ComplaintCategory,
   subject: string,
   description: string,
-  evidenceFiles: string[] = []
+  evidenceFiles: string[] = [],
+  requesterId?: string
 ): { ticketId: string; trackingSecret: string } {
   const ticketId = generateTicketId();
   const trackingSecret = generateTrackingSecret();
@@ -64,6 +67,7 @@ export function submitComplaint(
   const complaint: Complaint = {
     ticketId,
     secretHash,
+    requesterId,
     type,
     category,
     subject,
@@ -77,17 +81,21 @@ export function submitComplaint(
         status: 'Submitted',
         comment: 'Ticket has been successfully submitted and queued for review.',
         timestamp: new Date().toISOString(),
-      }
-    ]
+      },
+    ],
   };
 
   complaintsDb.push(complaint);
+
+  // Background async persistence to Neon PostgreSQL if available
+  submitComplaintAsync(type, category, subject, description, evidenceFiles, requesterId, ticketId, secretHash).catch(() => {});
+
   return { ticketId, trackingSecret };
 }
 
 export function trackComplaint(ticketId: string, trackingSecret: string): Complaint | null {
   const providedHash = hashSecret(trackingSecret);
-  const complaint = complaintsDb.find(c => {
+  const complaint = complaintsDb.find((c) => {
     if (c.ticketId !== ticketId) return false;
     const bufA = Buffer.from(c.secretHash, 'hex');
     const bufB = Buffer.from(providedHash, 'hex');
@@ -96,12 +104,12 @@ export function trackComplaint(ticketId: string, trackingSecret: string): Compla
   });
 
   if (!complaint) return null;
-  return { ...complaint }; // Return copy
+  return { ...complaint };
 }
 
 export function submitFeedback(ticketId: string, trackingSecret: string, rating: number, feedbackComment: string): boolean {
   const providedHash = hashSecret(trackingSecret);
-  const complaint = complaintsDb.find(c => {
+  const complaint = complaintsDb.find((c) => {
     if (c.ticketId !== ticketId) return false;
     const bufA = Buffer.from(c.secretHash, 'hex');
     const bufB = Buffer.from(providedHash, 'hex');
@@ -114,13 +122,14 @@ export function submitFeedback(ticketId: string, trackingSecret: string, rating:
 
   complaint.rating = rating;
   complaint.feedbackComment = feedbackComment;
+
+  // Background async persistence
+  submitFeedbackAsync(ticketId, trackingSecret, rating, feedbackComment).catch(() => {});
+
   return true;
 }
 
-// Admin API Functions
-
 export function adminGetAllComplaints(): Omit<Complaint, 'secretHash'>[] {
-  // Strip the secret hash for admin view
   return complaintsDb.map((c) => {
     const { secretHash: _secretHash, ...rest } = c;
     void _secretHash;
@@ -129,7 +138,7 @@ export function adminGetAllComplaints(): Omit<Complaint, 'secretHash'>[] {
 }
 
 export function adminUpdateComplaintStatus(ticketId: string, newStatus: ComplaintStatus, comment: string): boolean {
-  const complaint = complaintsDb.find(c => c.ticketId === ticketId);
+  const complaint = complaintsDb.find((c) => c.ticketId === ticketId);
   if (!complaint) return false;
 
   complaint.status = newStatus;
@@ -137,8 +146,263 @@ export function adminUpdateComplaintStatus(ticketId: string, newStatus: Complain
     id: Math.random().toString(36).substring(7),
     status: newStatus,
     comment,
-    timestamp: new Date().toISOString()
+    timestamp: new Date().toISOString(),
   });
 
+  // Background async persistence
+  adminUpdateComplaintStatusAsync(ticketId, newStatus, comment).catch(() => {});
+
   return true;
+}
+
+// ── Persistent PostgreSQL Database Functions (Neon + Prisma) ──────────────────
+
+export async function submitComplaintAsync(
+  type: 'Complaint' | 'Improvement',
+  category: ComplaintCategory,
+  subject: string,
+  description: string,
+  evidenceFiles: string[] = [],
+  requesterId?: string,
+  explicitTicketId?: string,
+  explicitSecretHash?: string
+): Promise<{ ticketId: string; trackingSecret: string }> {
+  const ticketId = explicitTicketId || generateTicketId();
+  const trackingSecret = explicitSecretHash ? '' : generateTrackingSecret();
+  const secretHash = explicitSecretHash || hashSecret(trackingSecret);
+
+  try {
+    await prisma.complaintTicket.create({
+      data: {
+        ticketId,
+        requesterId,
+        type,
+        category,
+        subject,
+        description,
+        evidenceFiles,
+        status: 'Submitted',
+        secretHash,
+        logs: {
+          create: {
+            actionType: 'SUBMITTED',
+            newStatus: 'Submitted',
+            comment: 'Ticket has been successfully submitted and queued for review.',
+            visibility: 'PUBLIC',
+          },
+        },
+      },
+    });
+  } catch (err) {
+    // Falls back to in-memory store
+    console.warn('[complaints-db] Database persist warning:', (err as Error).message);
+  }
+
+  return { ticketId, trackingSecret };
+}
+
+export async function getStudentTicketsAsync(requesterId: string): Promise<Omit<Complaint, 'secretHash'>[]> {
+  try {
+    const dbTickets = await prisma.complaintTicket.findMany({
+      where: { requesterId },
+      include: {
+        logs: {
+          where: { visibility: 'PUBLIC' },
+          orderBy: { createdAt: 'desc' },
+        },
+      },
+      orderBy: { createdAt: 'desc' },
+    });
+
+    if (dbTickets.length > 0) {
+      return dbTickets.map((t) => ({
+        ticketId: t.ticketId,
+        type: t.type as 'Complaint' | 'Improvement',
+        category: t.category as ComplaintCategory,
+        subject: t.subject,
+        description: t.description,
+        evidenceFiles: t.evidenceFiles,
+        status: t.status as ComplaintStatus,
+        createdAt: t.createdAt.toISOString(),
+        updates: t.logs.map((l) => ({
+          id: l.id,
+          status: (l.newStatus || 'Submitted') as ComplaintStatus,
+          comment: l.comment,
+          timestamp: l.createdAt.toISOString(),
+        })),
+        rating: t.rating ?? undefined,
+        feedbackComment: t.feedbackComment ?? undefined,
+        assignedTo: t.assignedTo ?? undefined,
+      }));
+    }
+  } catch {
+    // Database fallback
+  }
+
+  // Memory fallback
+  return complaintsDb
+    .filter((c) => !requesterId || c.requesterId === requesterId)
+    .map((c) => {
+      const { secretHash: _s, ...rest } = c;
+      void _s;
+      return rest;
+    });
+}
+
+export async function trackComplaintAsync(ticketId: string, trackingSecret: string): Promise<Complaint | null> {
+  const providedHash = hashSecret(trackingSecret);
+
+  try {
+    const t = await prisma.complaintTicket.findUnique({
+      where: { ticketId },
+      include: {
+        logs: {
+          where: { visibility: 'PUBLIC' },
+          orderBy: { createdAt: 'asc' },
+        },
+      },
+    });
+
+    if (t) {
+      const bufA = Buffer.from(t.secretHash, 'hex');
+      const bufB = Buffer.from(providedHash, 'hex');
+      if (bufA.length === bufB.length && crypto.timingSafeEqual(bufA, bufB)) {
+        return {
+          ticketId: t.ticketId,
+          secretHash: t.secretHash,
+          type: t.type as 'Complaint' | 'Improvement',
+          category: t.category as ComplaintCategory,
+          subject: t.subject,
+          description: t.description,
+          evidenceFiles: t.evidenceFiles,
+          status: t.status as ComplaintStatus,
+          createdAt: t.createdAt.toISOString(),
+          updates: t.logs.map((l) => ({
+            id: l.id,
+            status: (l.newStatus || 'Submitted') as ComplaintStatus,
+            comment: l.comment,
+            timestamp: l.createdAt.toISOString(),
+          })),
+          rating: t.rating ?? undefined,
+          feedbackComment: t.feedbackComment ?? undefined,
+          assignedTo: t.assignedTo ?? undefined,
+        };
+      }
+      return null;
+    }
+  } catch {}
+
+  return trackComplaint(ticketId, trackingSecret);
+}
+
+export async function adminGetAllComplaintsAsync(): Promise<Omit<Complaint, 'secretHash'>[]> {
+  try {
+    const dbTickets = await prisma.complaintTicket.findMany({
+      include: {
+        logs: {
+          orderBy: { createdAt: 'desc' },
+        },
+      },
+      orderBy: { createdAt: 'desc' },
+    });
+
+    if (dbTickets.length > 0) {
+      return dbTickets.map((t) => ({
+        ticketId: t.ticketId,
+        type: t.type as 'Complaint' | 'Improvement',
+        category: t.category as ComplaintCategory,
+        subject: t.subject,
+        description: t.description,
+        evidenceFiles: t.evidenceFiles,
+        status: t.status as ComplaintStatus,
+        createdAt: t.createdAt.toISOString(),
+        updates: t.logs.map((l) => ({
+          id: l.id,
+          status: (l.newStatus || 'Submitted') as ComplaintStatus,
+          comment: l.comment,
+          timestamp: l.createdAt.toISOString(),
+        })),
+        rating: t.rating ?? undefined,
+        feedbackComment: t.feedbackComment ?? undefined,
+        assignedTo: t.assignedTo ?? undefined,
+      }));
+    }
+  } catch {}
+
+  return adminGetAllComplaints();
+}
+
+export async function adminUpdateComplaintStatusAsync(
+  ticketId: string,
+  newStatus: ComplaintStatus,
+  comment: string,
+  actorId?: string,
+  visibility: 'PUBLIC' | 'INTERNAL' = 'PUBLIC'
+): Promise<boolean> {
+  try {
+    const ticket = await prisma.complaintTicket.findUnique({ where: { ticketId } });
+    if (!ticket) return false;
+
+    await prisma.complaintTicket.update({
+      where: { ticketId },
+      data: {
+        status: newStatus,
+        resolvedAt: newStatus === 'Resolved' || newStatus === 'Closed' ? new Date() : undefined,
+        logs: {
+          create: {
+            actorId,
+            actionType: 'STATUS_UPDATE',
+            previousStatus: ticket.status,
+            newStatus,
+            comment,
+            visibility,
+          },
+        },
+      },
+    });
+
+    return true;
+  } catch {
+    return adminUpdateComplaintStatus(ticketId, newStatus, comment);
+  }
+}
+
+export async function submitFeedbackAsync(
+  ticketId: string,
+  trackingSecret: string,
+  rating: number,
+  feedbackComment: string
+): Promise<boolean> {
+  const providedHash = hashSecret(trackingSecret);
+
+  try {
+    const ticket = await prisma.complaintTicket.findUnique({ where: { ticketId } });
+    if (!ticket) return false;
+    if (ticket.status !== 'Resolved' && ticket.status !== 'Closed') return false;
+
+    const bufA = Buffer.from(ticket.secretHash, 'hex');
+    const bufB = Buffer.from(providedHash, 'hex');
+    if (bufA.length !== bufB.length || !crypto.timingSafeEqual(bufA, bufB)) {
+      return false;
+    }
+
+    await prisma.complaintTicket.update({
+      where: { ticketId },
+      data: {
+        rating,
+        feedbackComment,
+        logs: {
+          create: {
+            actionType: 'FEEDBACK_SUBMITTED',
+            comment: `Student submitted feedback: ${rating} stars. "${feedbackComment || 'No comment'}"`,
+            visibility: 'PUBLIC',
+          },
+        },
+      },
+    });
+
+    return true;
+  } catch {
+    return submitFeedback(ticketId, trackingSecret, rating, feedbackComment);
+  }
 }

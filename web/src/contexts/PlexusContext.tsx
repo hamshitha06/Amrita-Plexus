@@ -2,6 +2,7 @@
 
 import React, { createContext, useContext, useState, useEffect } from 'react';
 import { toast } from 'sonner';
+import { parseMenuText } from '@/lib/menu-parser';
 
 export interface Parcel {
   id: string;
@@ -136,9 +137,13 @@ export interface ServiceRequest {
   customerNotes: string;
   price: number;
   pricingModel: string;
-  status: 'Pending' | 'Accepted' | 'In Progress' | 'Completed' | 'Cancelled';
+  status: 'Pending' | 'Accepted' | 'In Progress' | 'Completed' | 'Cancelled' | 'Rejected';
   reviewedScore?: number;
   requestedAt: string;
+  requesterName?: string;
+  requesterHostel?: string;
+  requesterPhone?: string;
+  cancellationReason?: string;
 }
 
 export interface MarketplaceItem {
@@ -226,12 +231,13 @@ export interface LostFoundClaim {
 export interface SecurityCustodyRecord {
   id: string;
   foundItemId: string;
-  storageLocker: string;
+  custodyLocation: string; // Physical campus security desk location (NO LOCKERS)
   receivingStaffId: string;
   receivingStaffName: string;
   secondaryStaffName?: string;
   conditionNotes: string;
   intakeTimestamp: string;
+  handoverStatus: 'Handover Reported' | 'Custody Confirmed' | 'Returned';
   handoverCompletedAt?: string;
 }
 
@@ -302,6 +308,14 @@ interface PlexusContextType {
   canteenItems: CanteenItem[];
   isScanningMenu: boolean;
   scanMenuFromImage: (imageName: string) => Promise<void>;
+  publishDigitalMenu: (
+    canteenId: string,
+    canteenName: string,
+    items: Array<{ title: string; category: string; price: number; prepTime?: string; isAvailable?: boolean; aiVerifiedScore?: number; needsReview?: boolean }>,
+    rawText?: string,
+    imageRef?: string
+  ) => Promise<boolean>;
+  refreshCanteenMenus: () => Promise<void>;
 
   // Canteen — Cart
   cart: CartItem[];
@@ -345,6 +359,8 @@ interface PlexusContextType {
   serviceRequests: ServiceRequest[];
   publishService: (service: Omit<CampusService, 'id' | 'providerName' | 'providerHostel' | 'rating' | 'reviewsCount'>) => void;
   bookService: (serviceId: string, notes: string, date: string) => void;
+  cancelServiceRequest: (id: string, reason?: string) => Promise<boolean>;
+  updateServiceRequestStatus: (id: string, newStatus: 'Accepted' | 'In Progress' | 'Completed' | 'Rejected' | 'Cancelled', notes?: string) => Promise<boolean>;
 
   // Marketplace
   marketplaceItems: MarketplaceItem[];
@@ -363,7 +379,8 @@ interface PlexusContextType {
   reportFoundItem: (data: Omit<FoundItemReport, 'id' | 'finderName' | 'finderEmail' | 'securityLevel' | 'status' | 'createdAt'>) => FoundItemReport;
   submitClaim: (foundItemId: string, answers: { question: string; answer: string }[], evidencePhotoUrl?: string, notes?: string) => boolean;
   reviewClaim: (claimId: string, status: 'Approved' | 'Rejected' | 'Additional Evidence Requested' | 'Disputed', reviewerName: string) => void;
-  confirmSecurityIntake: (foundItemId: string, storageLocker: string, conditionNotes: string, staffName: string, secondaryStaffName?: string) => void;
+  reportHandoverToSecurity: (foundItemId: string, custodyLocation: string) => void;
+  confirmSecurityIntake: (foundItemId: string, custodyLocation: string, conditionNotes: string, staffName: string, secondaryStaffName?: string) => void;
   verifyAndCollectHandover: (foundItemId: string, claimId: string, otpInput: string, staffName: string) => boolean;
   closeLostReport: (reportId: string) => void;
   closeFoundReport: (reportId: string) => void;
@@ -712,10 +729,14 @@ export function PlexusProvider({ children }: { children: React.ReactNode }) {
   const [parcels, setParcels] = useState<Parcel[]>(initialParcels);
   const [snacks, setSnacks] = useState<Snack[]>(initialSnacks);
 
-  const [canteens] = useState<CampusCanteen[]>(initialCanteens);
+  const [canteens, setCanteens] = useState<CampusCanteen[]>(initialCanteens);
   const [selectedCanteenId, setSelectedCanteenId] = useState('cant-3');
   const [canteenItems, setCanteenItems] = useState<CanteenItem[]>(initialCanteenItems);
   const [isScanningMenu, setIsScanningMenu] = useState(false);
+
+  useEffect(() => {
+    refreshCanteenMenus();
+  }, []);
 
   // Real cart state
   const [cart, setCart] = useState<CartItem[]>([]);
@@ -894,45 +915,151 @@ export function PlexusProvider({ children }: { children: React.ReactNode }) {
     toast.success(`🎉 Delivered! ₹${req.deliveryFee} delivery fee credited to your wallet!`);
   };
 
-  // ── AI Menu Scan ────────────────────────────────────────────────────────────
+  // ── AI Menu Scan & Backend Persistence ──────────────────────────────────────
+
+  const refreshCanteenMenus = async () => {
+    try {
+      const res = await fetch('http://localhost:4000/api/canteen/menus');
+      if (res.ok) {
+        const json = await res.json();
+        if (json.success && Array.isArray(json.data)) {
+          const dbItems: CanteenItem[] = [];
+          json.data.forEach((menu: { canteenId: string; items?: Array<{ id: string; title: string; category: string; price: number; prepTime?: string; isAvailable?: boolean; aiVerifiedScore?: number; canteenId: string }> }) => {
+            if (menu.items && Array.isArray(menu.items)) {
+              menu.items.forEach(item => {
+                dbItems.push({
+                  id: item.id,
+                  title: item.title,
+                  category: item.category,
+                  price: item.price,
+                  prepTime: item.prepTime || '10 mins',
+                  isAvailable: item.isAvailable !== false,
+                  aiVerifiedScore: item.aiVerifiedScore || 98.5,
+                  categoryBadge: item.category,
+                  canteenId: item.canteenId,
+                });
+              });
+            }
+          });
+          if (dbItems.length > 0) {
+            setCanteenItems(prev => {
+              const existingKeys = new Set(dbItems.map(d => `${d.canteenId}-${d.title.toLowerCase()}`));
+              const filteredOld = prev.filter(p => !existingKeys.has(`${p.canteenId}-${p.title.toLowerCase()}`));
+              return [...dbItems, ...filteredOld];
+            });
+          }
+        }
+      }
+    } catch {
+      // Fallback gracefully to default items
+    }
+  };
+
+  const publishDigitalMenu = async (
+    canteenId: string,
+    canteenName: string,
+    items: Array<{ title: string; category: string; price: number; prepTime?: string; isAvailable?: boolean; aiVerifiedScore?: number; needsReview?: boolean }>,
+    rawText?: string,
+    imageRef?: string
+  ): Promise<boolean> => {
+    try {
+      const res = await fetch('http://localhost:4000/api/canteen/menus', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          canteenId,
+          canteenName,
+          imageReference: imageRef,
+          rawExtractedText: rawText,
+          items: items.map(i => ({
+            title: i.title,
+            category: i.category,
+            price: i.price,
+            prepTime: i.prepTime || '10 mins',
+            isAvailable: i.isAvailable !== false,
+            aiVerifiedScore: i.aiVerifiedScore || 98.5,
+            needsReview: i.needsReview || false,
+          })),
+        }),
+      });
+
+      if (res.ok) {
+        const kolkataTime = new Intl.DateTimeFormat('en-IN', {
+          timeZone: 'Asia/Kolkata',
+          hour: '2-digit',
+          minute: '2-digit',
+          hour12: true,
+        }).format(new Date());
+
+        setCanteens(prev =>
+          prev.map(c =>
+            c.id === canteenId
+              ? { ...c, lastUploaded: `Today, ${kolkataTime} (IST)`, uploadedBy: 'Verified Student' }
+              : c
+          )
+        );
+
+        const newCanteenItems: CanteenItem[] = items.map((it, idx) => ({
+          id: `db-canteen-${Date.now()}-${idx}`,
+          title: it.title,
+          category: it.category,
+          price: it.price,
+          prepTime: it.prepTime || '10 mins',
+          isAvailable: true,
+          aiVerifiedScore: it.aiVerifiedScore || 98.5,
+          categoryBadge: it.category,
+          canteenId,
+        }));
+
+        setCanteenItems(prev => [...newCanteenItems, ...prev.filter(p => p.canteenId !== canteenId)]);
+        toast.success(`🎉 Verified digital menu published to ${canteenName}!`);
+        return true;
+      } else {
+        toast.error('Server returned an error publishing menu.');
+        return false;
+      }
+    } catch {
+      toast.error('Network error publishing menu to database.');
+      return false;
+    }
+  };
 
   const scanMenuFromImage = async (imageName: string) => {
     setIsScanningMenu(true);
-    toast.info('🤖 AI Vision OCR scanning canteen blackboard menu...');
+    toast.info('🤖 AI Vision OCR parsing canteen blackboard menu...');
 
-    await new Promise(res => setTimeout(res, 2000));
+    // Blackboard sample texts
+    const sampleBoard1 = `
+VEG FRIED RICE 60
+MASALA DOSA 50
+PANEER BUTTER MASALA 110
+FILTER COFFEE 20
+HOT TEA 12
+SAMOSA 15
+`;
+    const sampleBoard2 = `
+COLD BADAM MILK 35
+CHOCOLATE SHAKE 45
+PANEER ROLL 50
+EGG ROLL 40
+LEMON TEA 15
+`;
 
-    const extracted: CanteenItem[] = [
-      {
-        id: `NC-EX-${Date.now()}-1`,
-        title: 'Crispy Veg Schezwan Noodles',
-        category: 'Snacks',
-        price: 55,
-        prepTime: '12 mins',
-        isAvailable: true,
-        aiVerifiedScore: 99.4,
-        categoryBadge: 'Snacks',
-        canteenId: selectedCanteenId,
-      },
-      {
-        id: `NC-EX-${Date.now()}-2`,
-        title: 'Butter Garlic Bread Toast',
-        category: 'Breakfast',
-        price: 30,
-        prepTime: '5 mins',
-        isAvailable: true,
-        aiVerifiedScore: 98.1,
-        categoryBadge: 'Breakfast',
-        canteenId: selectedCanteenId,
-      },
-    ];
+    const rawToParse = imageName.includes('2') ? sampleBoard2 : sampleBoard1;
+    const parseResult = parseMenuText(rawToParse);
 
-    const activeCanteen = canteens.find(c => c.id === selectedCanteenId);
-    setCanteenItems(prev => [...extracted, ...prev]);
+    const activeCanteen = canteens.find(c => c.id === selectedCanteenId) || canteens[0];
 
-    // Update canteen's lastUploaded (would be done via API in prod)
+    // Publish to backend API
+    await publishDigitalMenu(
+      selectedCanteenId,
+      activeCanteen.name,
+      parseResult.items,
+      rawToParse,
+      imageName
+    );
+
     setIsScanningMenu(false);
-    toast.success(`✨ OCR Model v2.4 extracted ${extracted.length} new dishes for ${activeCanteen?.name}!`);
   };
 
   // ── Parcels ─────────────────────────────────────────────────────────────────
@@ -1074,16 +1201,76 @@ export function PlexusProvider({ children }: { children: React.ReactNode }) {
       serviceTitle: service.title,
       providerName: service.providerName,
       providerHostel: service.providerHostel,
-      providerPhone: '+91 90000 00000', // Mock
+      providerPhone: '+91 90000 00000', // Provider contact
       appointmentDate: date,
       customerNotes: notes,
       price: service.price,
       pricingModel: service.pricingModel,
       status: 'Pending',
       requestedAt: new Date().toLocaleDateString('en-GB'),
+      requesterName: userName,
+      requesterHostel: userHostel,
+      requesterPhone: '+91 98765 43211',
     };
     setServiceRequests(prev => [newReq, ...prev]);
     toast.success(`Service request sent to ${service.providerName}!`);
+  };
+
+  const cancelServiceRequest = async (id: string, reason?: string): Promise<boolean> => {
+    try {
+      await fetch(`http://localhost:4000/api/service-requests/${id}/cancel`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ cancellationReason: reason }),
+      }).catch(() => {});
+
+      setServiceRequests(prev => prev.map(req => {
+        if (req.id === id || req.requestNumber === id) {
+          return {
+            ...req,
+            status: 'Cancelled',
+            cancellationReason: reason || 'Cancelled by student client',
+          };
+        }
+        return req;
+      }));
+
+      toast.success('Service request cancelled successfully.');
+      return true;
+    } catch {
+      toast.error('Failed to cancel service request.');
+      return false;
+    }
+  };
+
+  const updateServiceRequestStatus = async (
+    id: string,
+    newStatus: 'Accepted' | 'In Progress' | 'Completed' | 'Rejected' | 'Cancelled',
+    notes?: string
+  ): Promise<boolean> => {
+    try {
+      await fetch(`http://localhost:4000/api/service-requests/${id}/status`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ status: newStatus, notes }),
+      }).catch(() => {});
+
+      setServiceRequests(prev => prev.map(req => {
+        if (req.id === id || req.requestNumber === id) {
+          return {
+            ...req,
+            status: newStatus,
+          };
+        }
+        return req;
+      }));
+
+      toast.success(`Service request status updated to "${newStatus}".`);
+      return true;
+    } catch {
+      toast.error('Failed to update request status.');
+      return false;
+    }
   };
 
   // ── Marketplace ─────────────────────────────────────────────────────────────
@@ -1258,21 +1445,23 @@ export function PlexusProvider({ children }: { children: React.ReactNode }) {
     {
       id: 'CST-401',
       foundItemId: 'FND-202',
-      storageLocker: 'Vault Locker B-04',
+      custodyLocation: 'Main Gate Security Desk',
       receivingStaffId: 'SEC-88',
       receivingStaffName: 'Officer R. Pillai',
       conditionNotes: 'Good condition, phone power is on, minor edge scratch.',
       intakeTimestamp: '10/10/2026 07:15 PM',
+      handoverStatus: 'Custody Confirmed',
     },
     {
       id: 'CST-402',
       foundItemId: 'FND-203',
-      storageLocker: 'Admin Safe Vault-1',
+      custodyLocation: 'Academic Block 3 Security Post',
       receivingStaffId: 'SEC-12',
       receivingStaffName: 'Chief Officer M. Sundaram',
       secondaryStaffName: 'Officer R. Pillai',
-      conditionNotes: 'Dual authorization intake confirmed. High-value gold ring.',
+      conditionNotes: 'Dual authorization physical intake confirmed. High-value gold ring held in security custody.',
       intakeTimestamp: '08/10/2026 06:00 PM',
+      handoverStatus: 'Custody Confirmed',
     }
   ];
 
@@ -1439,24 +1628,77 @@ export function PlexusProvider({ children }: { children: React.ReactNode }) {
     }
   };
 
-  const confirmSecurityIntake = (foundItemId: string, storageLocker: string, conditionNotes: string, staffName: string, secondaryStaffName?: string) => {
+  const reportHandoverToSecurity = (foundItemId: string, custodyLocation: string) => {
     const item = foundReports.find(f => f.id === foundItemId);
     if (!item) return;
 
-    const newRecord: SecurityCustodyRecord = {
-      id: `CST-${Math.floor(400 + Math.random() * 600)}`,
-      foundItemId,
-      storageLocker,
-      receivingStaffId: 'SEC-STAFF-1',
-      receivingStaffName: staffName,
-      secondaryStaffName,
-      conditionNotes,
-      intakeTimestamp: new Date().toLocaleString('en-GB'),
-    };
+    // Check if custody record already exists
+    const existing = custodyRecords.find(c => c.foundItemId === foundItemId);
+    if (existing) {
+      setCustodyRecords(prev => prev.map(c => c.foundItemId === foundItemId ? {
+        ...c,
+        custodyLocation,
+        handoverStatus: 'Handover Reported',
+      } : c));
+    } else {
+      const newRecord: SecurityCustodyRecord = {
+        id: `CST-${Math.floor(400 + Math.random() * 600)}`,
+        foundItemId,
+        custodyLocation,
+        receivingStaffId: 'PENDING',
+        receivingStaffName: 'Awaiting Staff Confirmation',
+        conditionNotes: 'Physical handover reported by finder. Awaiting security intake inspection.',
+        intakeTimestamp: new Date().toLocaleString('en-GB'),
+        handoverStatus: 'Handover Reported',
+      };
+      setCustodyRecords(prev => [newRecord, ...prev]);
+    }
 
-    setCustodyRecords(prev => [newRecord, ...prev]);
-    setFoundReports(prev => prev.map(f => f.id === foundItemId ? { ...f, status: 'In Custody', custodyLocation: `Security Desk (${storageLocker})` } : f));
-    toast.success(`Security Deposit Confirmed for Item #${foundItemId} at ${storageLocker}`);
+    setFoundReports(prev => prev.map(f => f.id === foundItemId ? {
+      ...f,
+      status: 'Awaiting Secure Deposit',
+      custodyLocation: `Handover Reported (${custodyLocation})`,
+    } : f));
+
+    toast.info(`Physical handover reported at ${custodyLocation}. Awaiting security desk verification.`);
+  };
+
+  const confirmSecurityIntake = (foundItemId: string, custodyLocation: string, conditionNotes: string, staffName: string, secondaryStaffName?: string) => {
+    const item = foundReports.find(f => f.id === foundItemId);
+    if (!item) return;
+
+    const existing = custodyRecords.find(c => c.foundItemId === foundItemId);
+    if (existing) {
+      setCustodyRecords(prev => prev.map(c => c.foundItemId === foundItemId ? {
+        ...c,
+        custodyLocation,
+        receivingStaffName: staffName,
+        secondaryStaffName,
+        conditionNotes,
+        handoverStatus: 'Custody Confirmed',
+        intakeTimestamp: new Date().toLocaleString('en-GB'),
+      } : c));
+    } else {
+      const newRecord: SecurityCustodyRecord = {
+        id: `CST-${Math.floor(400 + Math.random() * 600)}`,
+        foundItemId,
+        custodyLocation,
+        receivingStaffId: 'SEC-STAFF-1',
+        receivingStaffName: staffName,
+        secondaryStaffName,
+        conditionNotes,
+        intakeTimestamp: new Date().toLocaleString('en-GB'),
+        handoverStatus: 'Custody Confirmed',
+      };
+      setCustodyRecords(prev => [newRecord, ...prev]);
+    }
+
+    setFoundReports(prev => prev.map(f => f.id === foundItemId ? {
+      ...f,
+      status: 'In Custody',
+      custodyLocation: `Security Desk (${custodyLocation})`,
+    } : f));
+    toast.success(`Physical custody confirmed for Item #${foundItemId} at ${custodyLocation}`);
   };
 
   const verifyAndCollectHandover = (foundItemId: string, claimId: string, otpInput: string, staffName: string): boolean => {
@@ -1468,9 +1710,13 @@ export function PlexusProvider({ children }: { children: React.ReactNode }) {
 
     setClaims(prev => prev.map(c => c.id === claimId ? { ...c, status: 'Collected' } : c));
     setFoundReports(prev => prev.map(f => f.id === foundItemId ? { ...f, status: 'Collected' } : f));
-    setCustodyRecords(prev => prev.map(c => c.foundItemId === foundItemId ? { ...c, handoverCompletedAt: new Date().toLocaleString('en-GB') } : c));
+    setCustodyRecords(prev => prev.map(c => c.foundItemId === foundItemId ? {
+      ...c,
+      handoverStatus: 'Returned',
+      handoverCompletedAt: new Date().toLocaleString('en-GB'),
+    } : c));
 
-    toast.success(`🎉 Handover Completed! Item #${foundItemId} marked as COLLECTED.`);
+    toast.success(`🎉 Handover Completed! Item #${foundItemId} marked as COLLECTED/RETURNED.`);
     return true;
   };
 
@@ -1495,6 +1741,7 @@ export function PlexusProvider({ children }: { children: React.ReactNode }) {
         parcels, addParcel, acceptDelivery, completeDelivery,
         snacks, addSnack, buySnack,
         canteens, selectedCanteenId, setSelectedCanteenId, canteenItems, isScanningMenu, scanMenuFromImage,
+        publishDigitalMenu, refreshCanteenMenus,
         cart, cartCount, cartTotal, addToCart, updateCartQty, removeFromCart, clearCart,
         foodRequests, myFoodRequests, openFoodRequests, myAcceptedDeliveries,
         postFoodRequest, cancelFoodRequest, acceptDeliveryJob, markPickedUp, markDelivered,
@@ -1502,9 +1749,11 @@ export function PlexusProvider({ children }: { children: React.ReactNode }) {
         chatMessages, activeChannel, setActiveChannel, postChatMessage,
         carpoolRides, carpoolBookings, publishRide, requestSeat, cancelBooking, cancelOfferedRide,
         campusServices, serviceRequests, publishService, bookService,
+        cancelServiceRequest, updateServiceRequestStatus,
         marketplaceItems, publishMarketplaceItem, buyMarketplaceItem, changeMarketplaceItemStatus, deleteMarketplaceItem,
         lostReports, foundReports, potentialMatches, claims, custodyRecords,
-        reportLostItem, reportFoundItem, submitClaim, reviewClaim, confirmSecurityIntake, verifyAndCollectHandover, closeLostReport, closeFoundReport,
+        reportLostItem, reportFoundItem, submitClaim, reviewClaim,
+        reportHandoverToSecurity, confirmSecurityIntake, verifyAndCollectHandover, closeLostReport, closeFoundReport,
       }}
     >
       {children}

@@ -17,6 +17,7 @@ const submitComplaintSchema = z.object({
   subject: z.string().trim().min(5, "Subject must be at least 5 characters.").max(120, "Subject exceeds 120 characters."),
   description: z.string().trim().min(20, "Description must be at least 20 characters.").max(3000, "Description exceeds 3000 characters."),
   evidenceFiles: z.array(z.string().max(255)).max(5, "Maximum 5 evidence attachments allowed.").default([]),
+  requesterId: z.string().optional(),
 });
 
 export async function POST(req: NextRequest) {
@@ -35,8 +36,8 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ error: firstError }, { status: 400 });
     }
 
-    const { type, category, subject, description, evidenceFiles } = parsed.data;
-    const result = submitComplaint(type, category, subject, description, evidenceFiles);
+    const { type, category, subject, description, evidenceFiles, requesterId } = parsed.data;
+    const result = submitComplaint(type, category, subject, description, evidenceFiles, requesterId);
 
     // Return the trackingSecret ONLY once upon creation — it is never stored in plaintext
     return NextResponse.json(
