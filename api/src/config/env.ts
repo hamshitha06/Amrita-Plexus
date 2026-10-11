@@ -27,8 +27,14 @@ const envSchema = z.object({
   SMTP_USER: z.string().default(''),
   SMTP_PASS: z.string().default(''),
   EMAIL_FROM: z.string().default('noreply@campusconnect.local'),
-  APP_URL: z.string().url(),
+  APP_URL: z.string().url().default('http://localhost:3000'),
   ALLOWED_EMAIL_DOMAINS: z.string().default('cb.amrita.edu,am.amrita.edu,amrita.edu'),
+  R2_ACCOUNT_ID: z.string().default(''),
+  R2_ACCESS_KEY_ID: z.string().default(''),
+  R2_SECRET_ACCESS_KEY: z.string().default(''),
+  R2_ENDPOINT: z.string().default(''),
+  R2_TOKEN: z.string().default(''),
+  R2_BUCKET_NAME: z.string().default('amrita-plexus'),
 });
 
 const parsed = envSchema.safeParse(process.env);
