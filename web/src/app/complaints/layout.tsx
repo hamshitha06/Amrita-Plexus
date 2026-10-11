@@ -5,7 +5,7 @@ import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { RouteGuard } from "@/components/auth/RouteGuard";
 import { AppLayout } from "@/components/layout/AppLayout";
-import { MessageSquare, Plus, Search, ShieldCheck } from "lucide-react";
+import { MessageSquare, Plus, ListFilter, Search, ShieldCheck } from "lucide-react";
 
 export default function ComplaintsLayout({ children }: { children: React.ReactNode }) {
   const pathname = usePathname();
@@ -13,6 +13,7 @@ export default function ComplaintsLayout({ children }: { children: React.ReactNo
   const tabs = [
     { name: "Complaints Overview", href: "/complaints", icon: MessageSquare },
     { name: "Submit Ticket", href: "/complaints/new", icon: Plus },
+    { name: "My Tickets", href: "/complaints/my-tickets", icon: ListFilter },
     { name: "Track Status", href: "/complaints/track", icon: Search },
   ];
 

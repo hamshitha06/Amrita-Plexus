@@ -136,9 +136,13 @@ export interface ServiceRequest {
   customerNotes: string;
   price: number;
   pricingModel: string;
-  status: 'Pending' | 'Accepted' | 'In Progress' | 'Completed' | 'Cancelled';
+  status: 'Pending' | 'Accepted' | 'In Progress' | 'Completed' | 'Cancelled' | 'Rejected';
   reviewedScore?: number;
   requestedAt: string;
+  requesterName?: string;
+  requesterHostel?: string;
+  requesterPhone?: string;
+  cancellationReason?: string;
 }
 
 export interface MarketplaceItem {
@@ -226,12 +230,13 @@ export interface LostFoundClaim {
 export interface SecurityCustodyRecord {
   id: string;
   foundItemId: string;
-  storageLocker: string;
+  custodyLocation: string; // Physical campus security desk location (NO LOCKERS)
   receivingStaffId: string;
   receivingStaffName: string;
   secondaryStaffName?: string;
   conditionNotes: string;
   intakeTimestamp: string;
+  handoverStatus: 'Handover Reported' | 'Custody Confirmed' | 'Returned';
   handoverCompletedAt?: string;
 }
 
@@ -345,6 +350,8 @@ interface PlexusContextType {
   serviceRequests: ServiceRequest[];
   publishService: (service: Omit<CampusService, 'id' | 'providerName' | 'providerHostel' | 'rating' | 'reviewsCount'>) => void;
   bookService: (serviceId: string, notes: string, date: string) => void;
+  cancelServiceRequest: (id: string, reason?: string) => Promise<boolean>;
+  updateServiceRequestStatus: (id: string, newStatus: 'Accepted' | 'In Progress' | 'Completed' | 'Rejected' | 'Cancelled', notes?: string) => Promise<boolean>;
 
   // Marketplace
   marketplaceItems: MarketplaceItem[];
@@ -363,7 +370,8 @@ interface PlexusContextType {
   reportFoundItem: (data: Omit<FoundItemReport, 'id' | 'finderName' | 'finderEmail' | 'securityLevel' | 'status' | 'createdAt'>) => FoundItemReport;
   submitClaim: (foundItemId: string, answers: { question: string; answer: string }[], evidencePhotoUrl?: string, notes?: string) => boolean;
   reviewClaim: (claimId: string, status: 'Approved' | 'Rejected' | 'Additional Evidence Requested' | 'Disputed', reviewerName: string) => void;
-  confirmSecurityIntake: (foundItemId: string, storageLocker: string, conditionNotes: string, staffName: string, secondaryStaffName?: string) => void;
+  reportHandoverToSecurity: (foundItemId: string, custodyLocation: string) => void;
+  confirmSecurityIntake: (foundItemId: string, custodyLocation: string, conditionNotes: string, staffName: string, secondaryStaffName?: string) => void;
   verifyAndCollectHandover: (foundItemId: string, claimId: string, otpInput: string, staffName: string) => boolean;
   closeLostReport: (reportId: string) => void;
   closeFoundReport: (reportId: string) => void;
@@ -1074,16 +1082,76 @@ export function PlexusProvider({ children }: { children: React.ReactNode }) {
       serviceTitle: service.title,
       providerName: service.providerName,
       providerHostel: service.providerHostel,
-      providerPhone: '+91 90000 00000', // Mock
+      providerPhone: '+91 90000 00000', // Provider contact
       appointmentDate: date,
       customerNotes: notes,
       price: service.price,
       pricingModel: service.pricingModel,
       status: 'Pending',
       requestedAt: new Date().toLocaleDateString('en-GB'),
+      requesterName: userName,
+      requesterHostel: userHostel,
+      requesterPhone: '+91 98765 43211',
     };
     setServiceRequests(prev => [newReq, ...prev]);
     toast.success(`Service request sent to ${service.providerName}!`);
+  };
+
+  const cancelServiceRequest = async (id: string, reason?: string): Promise<boolean> => {
+    try {
+      await fetch(`http://localhost:4000/api/service-requests/${id}/cancel`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ cancellationReason: reason }),
+      }).catch(() => {});
+
+      setServiceRequests(prev => prev.map(req => {
+        if (req.id === id || req.requestNumber === id) {
+          return {
+            ...req,
+            status: 'Cancelled',
+            cancellationReason: reason || 'Cancelled by student client',
+          };
+        }
+        return req;
+      }));
+
+      toast.success('Service request cancelled successfully.');
+      return true;
+    } catch {
+      toast.error('Failed to cancel service request.');
+      return false;
+    }
+  };
+
+  const updateServiceRequestStatus = async (
+    id: string,
+    newStatus: 'Accepted' | 'In Progress' | 'Completed' | 'Rejected' | 'Cancelled',
+    notes?: string
+  ): Promise<boolean> => {
+    try {
+      await fetch(`http://localhost:4000/api/service-requests/${id}/status`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ status: newStatus, notes }),
+      }).catch(() => {});
+
+      setServiceRequests(prev => prev.map(req => {
+        if (req.id === id || req.requestNumber === id) {
+          return {
+            ...req,
+            status: newStatus,
+          };
+        }
+        return req;
+      }));
+
+      toast.success(`Service request status updated to "${newStatus}".`);
+      return true;
+    } catch {
+      toast.error('Failed to update request status.');
+      return false;
+    }
   };
 
   // ── Marketplace ─────────────────────────────────────────────────────────────
@@ -1258,21 +1326,23 @@ export function PlexusProvider({ children }: { children: React.ReactNode }) {
     {
       id: 'CST-401',
       foundItemId: 'FND-202',
-      storageLocker: 'Vault Locker B-04',
+      custodyLocation: 'Main Gate Security Desk',
       receivingStaffId: 'SEC-88',
       receivingStaffName: 'Officer R. Pillai',
       conditionNotes: 'Good condition, phone power is on, minor edge scratch.',
       intakeTimestamp: '10/10/2026 07:15 PM',
+      handoverStatus: 'Custody Confirmed',
     },
     {
       id: 'CST-402',
       foundItemId: 'FND-203',
-      storageLocker: 'Admin Safe Vault-1',
+      custodyLocation: 'Academic Block 3 Security Post',
       receivingStaffId: 'SEC-12',
       receivingStaffName: 'Chief Officer M. Sundaram',
       secondaryStaffName: 'Officer R. Pillai',
-      conditionNotes: 'Dual authorization intake confirmed. High-value gold ring.',
+      conditionNotes: 'Dual authorization physical intake confirmed. High-value gold ring held in security custody.',
       intakeTimestamp: '08/10/2026 06:00 PM',
+      handoverStatus: 'Custody Confirmed',
     }
   ];
 
@@ -1439,24 +1509,77 @@ export function PlexusProvider({ children }: { children: React.ReactNode }) {
     }
   };
 
-  const confirmSecurityIntake = (foundItemId: string, storageLocker: string, conditionNotes: string, staffName: string, secondaryStaffName?: string) => {
+  const reportHandoverToSecurity = (foundItemId: string, custodyLocation: string) => {
     const item = foundReports.find(f => f.id === foundItemId);
     if (!item) return;
 
-    const newRecord: SecurityCustodyRecord = {
-      id: `CST-${Math.floor(400 + Math.random() * 600)}`,
-      foundItemId,
-      storageLocker,
-      receivingStaffId: 'SEC-STAFF-1',
-      receivingStaffName: staffName,
-      secondaryStaffName,
-      conditionNotes,
-      intakeTimestamp: new Date().toLocaleString('en-GB'),
-    };
+    // Check if custody record already exists
+    const existing = custodyRecords.find(c => c.foundItemId === foundItemId);
+    if (existing) {
+      setCustodyRecords(prev => prev.map(c => c.foundItemId === foundItemId ? {
+        ...c,
+        custodyLocation,
+        handoverStatus: 'Handover Reported',
+      } : c));
+    } else {
+      const newRecord: SecurityCustodyRecord = {
+        id: `CST-${Math.floor(400 + Math.random() * 600)}`,
+        foundItemId,
+        custodyLocation,
+        receivingStaffId: 'PENDING',
+        receivingStaffName: 'Awaiting Staff Confirmation',
+        conditionNotes: 'Physical handover reported by finder. Awaiting security intake inspection.',
+        intakeTimestamp: new Date().toLocaleString('en-GB'),
+        handoverStatus: 'Handover Reported',
+      };
+      setCustodyRecords(prev => [newRecord, ...prev]);
+    }
 
-    setCustodyRecords(prev => [newRecord, ...prev]);
-    setFoundReports(prev => prev.map(f => f.id === foundItemId ? { ...f, status: 'In Custody', custodyLocation: `Security Desk (${storageLocker})` } : f));
-    toast.success(`Security Deposit Confirmed for Item #${foundItemId} at ${storageLocker}`);
+    setFoundReports(prev => prev.map(f => f.id === foundItemId ? {
+      ...f,
+      status: 'Awaiting Secure Deposit',
+      custodyLocation: `Handover Reported (${custodyLocation})`,
+    } : f));
+
+    toast.info(`Physical handover reported at ${custodyLocation}. Awaiting security desk verification.`);
+  };
+
+  const confirmSecurityIntake = (foundItemId: string, custodyLocation: string, conditionNotes: string, staffName: string, secondaryStaffName?: string) => {
+    const item = foundReports.find(f => f.id === foundItemId);
+    if (!item) return;
+
+    const existing = custodyRecords.find(c => c.foundItemId === foundItemId);
+    if (existing) {
+      setCustodyRecords(prev => prev.map(c => c.foundItemId === foundItemId ? {
+        ...c,
+        custodyLocation,
+        receivingStaffName: staffName,
+        secondaryStaffName,
+        conditionNotes,
+        handoverStatus: 'Custody Confirmed',
+        intakeTimestamp: new Date().toLocaleString('en-GB'),
+      } : c));
+    } else {
+      const newRecord: SecurityCustodyRecord = {
+        id: `CST-${Math.floor(400 + Math.random() * 600)}`,
+        foundItemId,
+        custodyLocation,
+        receivingStaffId: 'SEC-STAFF-1',
+        receivingStaffName: staffName,
+        secondaryStaffName,
+        conditionNotes,
+        intakeTimestamp: new Date().toLocaleString('en-GB'),
+        handoverStatus: 'Custody Confirmed',
+      };
+      setCustodyRecords(prev => [newRecord, ...prev]);
+    }
+
+    setFoundReports(prev => prev.map(f => f.id === foundItemId ? {
+      ...f,
+      status: 'In Custody',
+      custodyLocation: `Security Desk (${custodyLocation})`,
+    } : f));
+    toast.success(`Physical custody confirmed for Item #${foundItemId} at ${custodyLocation}`);
   };
 
   const verifyAndCollectHandover = (foundItemId: string, claimId: string, otpInput: string, staffName: string): boolean => {
@@ -1468,9 +1591,13 @@ export function PlexusProvider({ children }: { children: React.ReactNode }) {
 
     setClaims(prev => prev.map(c => c.id === claimId ? { ...c, status: 'Collected' } : c));
     setFoundReports(prev => prev.map(f => f.id === foundItemId ? { ...f, status: 'Collected' } : f));
-    setCustodyRecords(prev => prev.map(c => c.foundItemId === foundItemId ? { ...c, handoverCompletedAt: new Date().toLocaleString('en-GB') } : c));
+    setCustodyRecords(prev => prev.map(c => c.foundItemId === foundItemId ? {
+      ...c,
+      handoverStatus: 'Returned',
+      handoverCompletedAt: new Date().toLocaleString('en-GB'),
+    } : c));
 
-    toast.success(`🎉 Handover Completed! Item #${foundItemId} marked as COLLECTED.`);
+    toast.success(`🎉 Handover Completed! Item #${foundItemId} marked as COLLECTED/RETURNED.`);
     return true;
   };
 
@@ -1502,9 +1629,11 @@ export function PlexusProvider({ children }: { children: React.ReactNode }) {
         chatMessages, activeChannel, setActiveChannel, postChatMessage,
         carpoolRides, carpoolBookings, publishRide, requestSeat, cancelBooking, cancelOfferedRide,
         campusServices, serviceRequests, publishService, bookService,
+        cancelServiceRequest, updateServiceRequestStatus,
         marketplaceItems, publishMarketplaceItem, buyMarketplaceItem, changeMarketplaceItemStatus, deleteMarketplaceItem,
         lostReports, foundReports, potentialMatches, claims, custodyRecords,
-        reportLostItem, reportFoundItem, submitClaim, reviewClaim, confirmSecurityIntake, verifyAndCollectHandover, closeLostReport, closeFoundReport,
+        reportLostItem, reportFoundItem, submitClaim, reviewClaim,
+        reportHandoverToSecurity, confirmSecurityIntake, verifyAndCollectHandover, closeLostReport, closeFoundReport,
       }}
     >
       {children}

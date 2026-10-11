@@ -252,30 +252,41 @@ export default function ReportFoundItemPage() {
             </div>
 
             {/* Custody Location */}
-            <div className="space-y-3 pt-2 border-t border-slate-100">
-              <h3 className="text-sm font-black text-slate-900 border-b border-slate-100 pb-2">5. Current Custody Information</h3>
+            <div className="space-y-4 pt-2 border-t border-slate-100">
+              <h3 className="text-sm font-black text-slate-900 border-b border-slate-100 pb-2">5. Current Custody &amp; Handover Status</h3>
 
               <div>
                 <label className="text-xs font-bold text-slate-700 mb-1.5 block">
-                  Current Custody / Deposit Location <span className="text-rose-500">*</span>
+                  Current Item Custody Status <span className="text-rose-500">*</span>
                 </label>
-                <input
-                  type="text"
+                <select
                   required
                   value={custodyLocation}
                   onChange={e => setCustodyLocation(e.target.value)}
-                  placeholder="e.g. With Finder (Hostel A, Room 201), Deposited at Main Security Gate..."
                   className="w-full bg-slate-50 border border-slate-200 rounded-xl px-4 py-3 text-xs sm:text-sm font-semibold text-slate-900 focus:outline-hidden focus:border-indigo-600 focus:bg-white transition-all"
-                />
+                >
+                  <option value="">-- Select Custody State &amp; Location --</option>
+                  <option value="With Finder (Kept Safely in Hostel)">Item currently with finder (Kept safely in hostel)</option>
+                  <option value="Handover Planned: Main Gate Security Desk">Handover to security planned: Main Gate Security Desk</option>
+                  <option value="Handover Planned: Central Library Security Counter">Handover to security planned: Central Library Security Counter</option>
+                  <option value="Handover Planned: Academic Block 2 Security Desk">Handover to security planned: Academic Block 2 Security Desk</option>
+                  <option value="Handover Reported: Main Gate Security Desk">Handover reported: Main Gate Security Desk</option>
+                  <option value="Handover Reported: Central Library Security Counter">Handover reported: Central Library Security Counter</option>
+                  <option value="Handover Reported: Academic Block 2 Security Desk">Handover reported: Academic Block 2 Security Desk</option>
+                  <option value="Handover Reported: Hostel Gate Security Desk">Handover reported: Hostel Gate Security Desk</option>
+                </select>
+                <p className="text-[11px] text-slate-500 mt-1">
+                  Note: Reporting that an item has been handed over sets its state to <strong>Handover Reported</strong>. Confirmed custody is recorded once authorized campus security personnel verify physical receipt.
+                </p>
               </div>
 
-              {/* Security notice for high risk items */}
+              {/* Physical Security Desk Protocol Notice */}
               <div className="bg-indigo-50 border border-indigo-200/80 rounded-2xl p-4 flex items-start gap-3 text-xs text-indigo-900 font-medium">
                 <AlertCircle className="w-5 h-5 text-indigo-600 shrink-0 mt-0.5" />
                 <div>
-                  <p className="font-bold">Security Protocol Notice:</p>
+                  <p className="font-bold">Campus Physical Custody Protocol:</p>
                   <p className="mt-0.5 text-[11px] leading-relaxed">
-                    Valuable electronics (L3), sensitive IDs (L4), and jewellery (L5) must be handed over to authorized Campus Security at Main Gate for safe vault storage.
+                    Our campus Security Custody Desk stores items physically with authorized staff. Valuable electronics (L3), sensitive IDs (L4), and high-value items (L5) should be deposited physically at the campus Security Desk. No automated lockers are used on campus.
                   </p>
                 </div>
               </div>

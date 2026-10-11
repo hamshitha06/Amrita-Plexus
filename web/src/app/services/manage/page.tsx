@@ -2,20 +2,24 @@
 
 import React, { useState } from 'react';
 import Link from 'next/link';
-import { Settings, Plus, Star, Users, Briefcase, ChevronRight } from 'lucide-react';
+import { Settings, Plus, Star, Users, Briefcase, ChevronRight, X, Clock, MapPin, Phone, User, Calendar, CheckCircle2, XCircle, Play } from 'lucide-react';
 import { AppLayout } from '@/components/layout/AppLayout';
-import { usePlexus } from '@/contexts/PlexusContext';
+import { usePlexus, ServiceRequest } from '@/contexts/PlexusContext';
 
 export default function ProviderManagementPage() {
-  const { userName, campusServices, serviceRequests } = usePlexus();
+  const { userName, campusServices, serviceRequests, updateServiceRequestStatus } = usePlexus();
   
   const [filter, setFilter] = useState('All');
-  const filters = ['All', 'Pending', 'Accepted', 'In Progress', 'Completed'];
+  const [selectedRequest, setSelectedRequest] = useState<ServiceRequest | null>(null);
+  const [updatingStatus, setUpdatingStatus] = useState(false);
+  const [adminNotes, setAdminNotes] = useState('');
+
+  const filters = ['All', 'Pending', 'Accepted', 'In Progress', 'Completed', 'Cancelled'];
 
   // Stats
   const myServices = campusServices.filter(s => s.providerName === userName);
   const myIncomingRequests = serviceRequests.filter(req => 
-    myServices.some(s => s.title === req.serviceTitle)
+    myServices.some(s => s.title === req.serviceTitle) || req.providerName === userName
   );
 
   const pendingCount = myIncomingRequests.filter(r => r.status === 'Pending').length;
@@ -25,6 +29,16 @@ export default function ProviderManagementPage() {
   const totalRating = myServices.reduce((sum, s) => sum + s.rating, 0);
   const totalReviews = myServices.reduce((sum, s) => sum + s.reviewsCount, 0);
   const avgRating = myServices.length > 0 ? (totalRating / myServices.length).toFixed(1) : '0.0';
+
+  const handleUpdateStatus = async (
+    newStatus: 'Accepted' | 'In Progress' | 'Completed' | 'Rejected' | 'Cancelled'
+  ) => {
+    if (!selectedRequest) return;
+    setUpdatingStatus(true);
+    await updateServiceRequestStatus(selectedRequest.id, newStatus, adminNotes);
+    setUpdatingStatus(false);
+    setSelectedRequest(prev => prev ? { ...prev, status: newStatus } : null);
+  };
 
   return (
     <AppLayout
@@ -116,14 +130,44 @@ export default function ProviderManagementPage() {
           ) : (
             <div className="space-y-4">
               {filteredRequests.map(req => (
-                <div key={req.id} className="border border-slate-200 rounded-xl p-4 flex items-center justify-between">
-                  <div>
-                    <h4 className="font-bold text-sm text-slate-900">{req.serviceTitle}</h4>
-                    <p className="text-xs text-slate-500">From: {req.providerName} • Status: {req.status}</p>
+                <div key={req.id} className="border border-slate-200 hover:border-slate-300 rounded-2xl p-4 flex flex-col md:flex-row md:items-center justify-between gap-4 transition-all">
+                  <div className="space-y-1">
+                    <div className="flex items-center gap-2">
+                      <span className="font-extrabold text-sm text-slate-900">{req.serviceTitle}</span>
+                      <span className={`px-2.5 py-0.5 rounded-full text-[10px] font-bold border ${
+                        req.status === 'Completed' ? 'bg-emerald-50 text-emerald-700 border-emerald-200' :
+                        req.status === 'Pending' ? 'bg-amber-50 text-amber-700 border-amber-200' :
+                        req.status === 'In Progress' ? 'bg-indigo-50 text-indigo-700 border-indigo-200' :
+                        req.status === 'Cancelled' ? 'bg-rose-50 text-rose-700 border-rose-200' :
+                        'bg-blue-50 text-blue-700 border-blue-200'
+                      }`}>
+                        {req.status}
+                      </span>
+                    </div>
+                    <p className="text-xs text-slate-500 font-medium">
+                      From: <strong className="text-slate-800">{req.requesterName || 'Student Client'}</strong> • {req.requesterHostel || 'Campus'} • Requested: {req.requestedAt}
+                    </p>
+                    {req.customerNotes && (
+                      <p className="text-xs text-slate-600 italic line-clamp-1 bg-slate-50 px-2 py-1 rounded-md border border-slate-100">
+                        "{req.customerNotes}"
+                      </p>
+                    )}
                   </div>
-                  <button className="text-xs font-bold text-blue-600 hover:text-blue-800">
-                    Manage →
-                  </button>
+
+                  <div className="flex items-center gap-3 shrink-0">
+                    <span className="text-xs font-bold text-slate-900">
+                      ₹{req.price} <span className="text-[10px] text-slate-400 font-normal">({req.pricingModel})</span>
+                    </span>
+                    <button 
+                      onClick={() => {
+                        setSelectedRequest(req);
+                        setAdminNotes('');
+                      }}
+                      className="px-4 py-2 bg-blue-50 hover:bg-blue-100 text-blue-700 border border-blue-200 rounded-xl text-xs font-bold transition-all shadow-2xs flex items-center gap-1"
+                    >
+                      Manage <ChevronRight className="w-3.5 h-3.5" />
+                    </button>
+                  </div>
                 </div>
               ))}
             </div>
@@ -171,6 +215,165 @@ export default function ProviderManagementPage() {
         </div>
 
       </div>
+
+      {/* Manage Request Modal */}
+      {selectedRequest && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/60 backdrop-blur-xs p-4">
+          <div className="bg-white rounded-2xl border border-slate-200 shadow-xl max-w-lg w-full overflow-hidden animate-in fade-in zoom-in duration-150 max-h-[90vh] flex flex-col">
+            <div className="p-5 border-b border-slate-100 flex items-center justify-between">
+              <div>
+                <div className="text-[10px] font-bold text-slate-400 uppercase">Manage Service Booking</div>
+                <h3 className="font-black text-slate-900 text-base leading-tight mt-0.5">{selectedRequest.serviceTitle}</h3>
+              </div>
+              <button 
+                onClick={() => setSelectedRequest(null)}
+                className="text-slate-400 hover:text-slate-600 p-1 rounded-lg"
+              >
+                <X className="w-4 h-4" />
+              </button>
+            </div>
+
+            <div className="p-5 space-y-4 overflow-y-auto">
+              {/* Status Header */}
+              <div className="flex items-center justify-between bg-slate-50 p-3 rounded-xl border border-slate-100">
+                <span className="text-xs font-medium text-slate-600">Current Status:</span>
+                <span className={`px-3 py-1 rounded-full text-xs font-bold border ${
+                  selectedRequest.status === 'Completed' ? 'bg-emerald-50 text-emerald-700 border-emerald-200' :
+                  selectedRequest.status === 'Pending' ? 'bg-amber-50 text-amber-700 border-amber-200' :
+                  selectedRequest.status === 'In Progress' ? 'bg-indigo-50 text-indigo-700 border-indigo-200' :
+                  selectedRequest.status === 'Cancelled' ? 'bg-rose-50 text-rose-700 border-rose-200' :
+                  'bg-blue-50 text-blue-700 border-blue-200'
+                }`}>
+                  {selectedRequest.status}
+                </span>
+              </div>
+
+              {/* Client Info Card */}
+              <div className="border border-slate-200 rounded-xl p-4 space-y-3">
+                <div className="text-[10px] font-bold text-slate-400 uppercase">Student Client Details</div>
+                <div className="grid grid-cols-2 gap-3 text-xs">
+                  <div className="flex items-center gap-1.5 text-slate-800 font-semibold">
+                    <User className="w-3.5 h-3.5 text-blue-500" />
+                    {selectedRequest.requesterName || 'Student Client'}
+                  </div>
+                  <div className="flex items-center gap-1.5 text-slate-800 font-semibold">
+                    <MapPin className="w-3.5 h-3.5 text-rose-500" />
+                    {selectedRequest.requesterHostel || 'Campus Hostel'}
+                  </div>
+                  <div className="flex items-center gap-1.5 text-slate-800 font-semibold col-span-2">
+                    <Phone className="w-3.5 h-3.5 text-emerald-500" />
+                    {selectedRequest.requesterPhone || '+91 98765 43211'}
+                  </div>
+                </div>
+
+                <div className="pt-2 border-t border-slate-100 flex items-center justify-between text-xs">
+                  <span className="text-slate-500">Agreed Rate:</span>
+                  <span className="font-black text-slate-900">₹{selectedRequest.price} ({selectedRequest.pricingModel})</span>
+                </div>
+
+                <div className="flex items-center gap-2 text-xs text-slate-700 bg-blue-50/50 p-2.5 rounded-lg border border-blue-100">
+                  <Calendar className="w-4 h-4 text-blue-600 shrink-0" />
+                  <span>Scheduled for: <strong>{selectedRequest.appointmentDate}</strong></span>
+                </div>
+              </div>
+
+              {/* Client Notes */}
+              {selectedRequest.customerNotes && (
+                <div className="space-y-1">
+                  <label className="text-[11px] font-bold text-slate-500 uppercase">Client Requirements &amp; Notes</label>
+                  <div className="bg-slate-50 border border-slate-200 p-3 rounded-xl text-xs text-slate-700 font-medium italic">
+                    "{selectedRequest.customerNotes}"
+                  </div>
+                </div>
+              )}
+
+              {/* Optional Progress Notes */}
+              <div>
+                <label className="block text-[11px] font-bold text-slate-600 uppercase mb-1">
+                  Add Provider Update Notes (Optional)
+                </label>
+                <textarea
+                  value={adminNotes}
+                  onChange={(e) => setAdminNotes(e.target.value)}
+                  placeholder="e.g., Confirmed room visit at 4:30 PM, equipment ready..."
+                  rows={2}
+                  className="w-full text-xs p-3 rounded-xl border border-slate-200 focus:outline-hidden focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500 transition-all resize-none"
+                />
+              </div>
+
+              {/* Status Action Workflow Buttons */}
+              <div className="pt-3 border-t border-slate-100 space-y-2">
+                <div className="text-[11px] font-bold text-slate-500 uppercase">Workflow Actions</div>
+                
+                {selectedRequest.status === 'Pending' && (
+                  <div className="grid grid-cols-2 gap-3">
+                    <button
+                      type="button"
+                      disabled={updatingStatus}
+                      onClick={() => handleUpdateStatus('Accepted')}
+                      className="px-4 py-2.5 bg-emerald-600 hover:bg-emerald-700 text-white rounded-xl text-xs font-bold transition-all shadow-xs flex items-center justify-center gap-1.5"
+                    >
+                      <CheckCircle2 className="w-4 h-4" /> Accept Request
+                    </button>
+                    <button
+                      type="button"
+                      disabled={updatingStatus}
+                      onClick={() => handleUpdateStatus('Rejected')}
+                      className="px-4 py-2.5 bg-slate-100 hover:bg-slate-200 text-slate-700 rounded-xl text-xs font-bold transition-all flex items-center justify-center gap-1.5"
+                    >
+                      <XCircle className="w-4 h-4" /> Decline
+                    </button>
+                  </div>
+                )}
+
+                {selectedRequest.status === 'Accepted' && (
+                  <button
+                    type="button"
+                    disabled={updatingStatus}
+                    onClick={() => handleUpdateStatus('In Progress')}
+                    className="w-full px-4 py-2.5 bg-indigo-600 hover:bg-indigo-700 text-white rounded-xl text-xs font-bold transition-all shadow-xs flex items-center justify-center gap-1.5"
+                  >
+                    <Play className="w-4 h-4" /> Start Work (Mark In Progress)
+                  </button>
+                )}
+
+                {selectedRequest.status === 'In Progress' && (
+                  <button
+                    type="button"
+                    disabled={updatingStatus}
+                    onClick={() => handleUpdateStatus('Completed')}
+                    className="w-full px-4 py-2.5 bg-emerald-600 hover:bg-emerald-700 text-white rounded-xl text-xs font-bold transition-all shadow-xs flex items-center justify-center gap-1.5"
+                  >
+                    <CheckCircle2 className="w-4 h-4" /> Mark Service as Completed
+                  </button>
+                )}
+
+                {selectedRequest.status === 'Completed' && (
+                  <div className="text-center p-3 bg-emerald-50 text-emerald-800 rounded-xl text-xs font-bold border border-emerald-100">
+                    🎉 Service successfully fulfilled and completed!
+                  </div>
+                )}
+
+                {selectedRequest.status === 'Cancelled' && (
+                  <div className="text-center p-3 bg-rose-50 text-rose-800 rounded-xl text-xs font-bold border border-rose-100">
+                    ⚠️ This request was cancelled by the student client.
+                  </div>
+                )}
+              </div>
+            </div>
+
+            <div className="p-4 bg-slate-50 border-t border-slate-100 flex items-center justify-end">
+              <button
+                type="button"
+                onClick={() => setSelectedRequest(null)}
+                className="px-5 py-2 text-xs font-bold text-slate-700 bg-white border border-slate-200 hover:bg-slate-100 rounded-xl transition-all"
+              >
+                Close
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </AppLayout>
   );
 }
