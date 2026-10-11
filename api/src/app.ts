@@ -4,6 +4,7 @@ import cors from 'cors';
 import cookieParser from 'cookie-parser';
 import { env } from './config/env';
 import authRouter from './routes/auth.routes';
+import walletRouter from './routes/wallet.routes';
 import { errorHandler } from './middleware/errorHandler';
 
 const app = express();
@@ -21,13 +22,14 @@ app.use(
   })
 );
 
-// Body parsing
-app.use(express.json());
-app.use(express.urlencoded({ extended: true }));
+// Body parsing with strict payload limit (Protection against DoS / Buffer Overflows)
+app.use(express.json({ limit: '100kb' }));
+app.use(express.urlencoded({ extended: true, limit: '100kb' }));
 app.use(cookieParser());
 
 // Routes
 app.use('/api/auth', authRouter);
+app.use('/api/wallet', walletRouter);
 
 // Health check
 app.get('/health', (_req, res) => {

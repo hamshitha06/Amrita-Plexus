@@ -1,7 +1,10 @@
 {
   "name": "campusconnect",
   "private": true,
-  "workspaces": ["web", "api"],
+  "workspaces": [
+    "web",
+    "api"
+  ],
   "scripts": {
     "dev": "concurrently \"npm run dev --workspace=api\" \"npm run dev --workspace=web\"",
     "docker:up": "docker compose up -d",
@@ -9,5 +12,9 @@
   },
   "devDependencies": {
     "concurrently": "^8.2.2"
+  },
+  "dependencies": {
+    "@neon/config": "^1.8.6",
+    "@neon/env": "^1.5.3"
   }
 }
