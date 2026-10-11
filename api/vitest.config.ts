@@ -8,9 +8,10 @@ export default defineConfig({
     testTimeout: 30000,
     env: {
       NODE_ENV: 'test',
-      DATABASE_URL: 'postgresql://campus:campus_secret@localhost:5432/campusconnect',
+      DATABASE_URL: process.env.DATABASE_URL || 'postgresql://test_user:test_password@localhost:5432/test_db',
       JWT_ACCESS_SECRET: 'test_access_secret_at_least_32_characters_long',
       JWT_REFRESH_SECRET: 'test_refresh_secret_at_least_32_characters_long',
+      OTP_SECRET: 'test_otp_secret_at_least_32_characters_long',
       JWT_ACCESS_EXPIRY: '15m',
       JWT_REFRESH_EXPIRY: '7d',
       WEB_ORIGIN: 'http://localhost:3000',

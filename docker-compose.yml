@@ -1,3 +1,8 @@
+# ==============================================================================
+# LOCAL DEVELOPMENT ONLY
+# This docker-compose configuration is strictly for local dev testing.
+# Production uses managed cloud services (Neon PostgreSQL & Cloudflare R2).
+# ==============================================================================
 version: '3.9'
 
 services:
@@ -6,15 +11,15 @@ services:
     container_name: campusconnect-postgres
     restart: unless-stopped
     environment:
-      POSTGRES_USER: ${POSTGRES_USER:-campus}
-      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-campus_secret}
-      POSTGRES_DB: ${POSTGRES_DB:-campusconnect}
+      POSTGRES_USER: ${POSTGRES_USER:?POSTGRES_USER environment variable is required}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?POSTGRES_PASSWORD environment variable is required}
+      POSTGRES_DB: ${POSTGRES_DB:?POSTGRES_DB environment variable is required}
     ports:
-      - "5432:5432"
+      - "127.0.0.1:5432:5432"
     volumes:
       - pgdata:/var/lib/postgresql/data
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U campus -d campusconnect"]
+      test: ["CMD-SHELL", "pg_isready -U $$POSTGRES_USER -d $$POSTGRES_DB"]
       interval: 5s
       timeout: 5s
       retries: 10
@@ -24,8 +29,8 @@ services:
     container_name: campusconnect-mailpit
     restart: unless-stopped
     ports:
-      - "1025:1025"   # SMTP
-      - "8025:8025"   # Web UI
+      - "127.0.0.1:1025:1025"   # SMTP (Localhost only)
+      - "127.0.0.1:8025:8025"   # Web UI (Localhost only)
     environment:
       MP_MAX_MESSAGES: 200
       MP_SMTP_AUTH_ACCEPT_ANY: 1
