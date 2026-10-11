@@ -1,0 +1,183 @@
+@import "tailwindcss";
+
+/* ─── Design tokens ──────────────────────────────────────────────────────────── */
+
+:root {
+  /* Brand palette */
+  --color-brand:        #1A0A0D;
+  --color-brand-deep:   #120608;
+  --color-amber:        #E8932A;
+  --color-amber-light:  #F5C47A;
+
+  /* Light mode surfaces */
+  --color-surface:          #F7F2EC;
+  --color-surface-alt:      #EFEBE3;
+  --color-surface-card:     #FFFFFF;
+
+  /* Text */
+  --color-foreground:   #1A0A0D;
+  --color-muted:        #7B6B5A;
+
+  /* Border */
+  --color-border:       #E5DDD0;
+
+  /* Semantic */
+  --color-error:        #DC2626;
+  --color-success:      #16A34A;
+
+  /* Fonts */
+  --font-sans:    'Geist', ui-sans-serif, system-ui, sans-serif;
+  --font-display: 'Bricolage Grotesque', ui-sans-serif, sans-serif;
+
+  /* Radius */
+  --radius-card:  20px;
+  --radius-input: 12px;
+  --radius-btn:   12px;
+}
+
+.dark {
+  --color-surface:      #0E0608;
+  --color-surface-alt:  #180B0D;
+  --color-surface-card: #1E0E10;
+  --color-foreground:   #F7F2EC;
+  --color-muted:        #9B8A78;
+  --color-border:       #2D1A1D;
+}
+
+/* ─── Base ───────────────────────────────────────────────────────────────────── */
+
+*, *::before, *::after {
+  box-sizing: border-box;
+}
+
+html {
+  scroll-behavior: smooth;
+}
+
+body {
+  background-color: var(--color-surface);
+  color: var(--color-foreground);
+  font-family: var(--font-sans);
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+  min-height: 100vh;
+}
+
+/* ─── Tailwind utilities as design tokens ────────────────────────────────────── */
+@layer utilities {
+  .bg-surface         { background-color: var(--color-surface); }
+  .bg-surface-dark    { background-color: var(--color-surface); }
+  .bg-surface-alt     { background-color: var(--color-surface-alt); }
+  .bg-surface-alt-dark { background-color: var(--color-surface-alt); }
+  .bg-card            { background-color: var(--color-surface-card); }
+  .bg-brand           { background-color: var(--color-brand); }
+  .bg-amber           { background-color: var(--color-amber); }
+
+  .text-foreground    { color: var(--color-foreground); }
+  .text-muted         { color: var(--color-muted); }
+  .text-amber         { color: var(--color-amber); }
+
+  .border-border      { border-color: var(--color-border); }
+  .border-border-dark { border-color: var(--color-border); }
+
+  .font-display       { font-family: var(--font-display); }
+}
+
+/* ─── Auth form component classes ───────────────────────────────────────────── */
+
+.auth-input {
+  width: 100%;
+  height: 52px;
+  padding: 0 16px;
+  background-color: var(--color-surface-card);
+  border: 1.5px solid var(--color-border);
+  border-radius: var(--radius-input);
+  color: var(--color-foreground);
+  font-family: var(--font-sans);
+  font-size: 15px;
+  transition: border-color 0.15s ease, box-shadow 0.15s ease;
+  outline: none;
+}
+
+.auth-input::placeholder {
+  color: var(--color-muted);
+  opacity: 0.6;
+}
+
+.auth-input:focus {
+  border-color: var(--color-amber);
+  box-shadow: 0 0 0 3px rgba(232, 147, 42, 0.15);
+}
+
+.auth-input[aria-invalid="true"] {
+  border-color: var(--color-error);
+  box-shadow: 0 0 0 3px rgba(220, 38, 38, 0.1);
+}
+
+.auth-label {
+  display: block;
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--color-foreground);
+  letter-spacing: 0.01em;
+}
+
+.auth-error {
+  font-size: 12px;
+  color: var(--color-error);
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.auth-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  height: 52px;
+  padding: 0 24px;
+  background: linear-gradient(135deg, var(--color-amber) 0%, #D4811E 100%);
+  color: #FFFFFF;
+  font-family: var(--font-sans);
+  font-size: 15px;
+  font-weight: 600;
+  border-radius: var(--radius-btn);
+  border: none;
+  cursor: pointer;
+  transition: opacity 0.15s ease, transform 0.1s ease, box-shadow 0.15s ease;
+  box-shadow: 0 4px 16px rgba(232, 147, 42, 0.35);
+  text-decoration: none;
+}
+
+.auth-btn:hover:not(:disabled) {
+  opacity: 0.92;
+  transform: translateY(-1px);
+  box-shadow: 0 6px 20px rgba(232, 147, 42, 0.45);
+}
+
+.auth-btn:active:not(:disabled) {
+  transform: translateY(0);
+}
+
+.auth-btn:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+/* ─── Scrollbar ──────────────────────────────────────────────────────────────── */
+
+::-webkit-scrollbar { width: 6px; height: 6px; }
+::-webkit-scrollbar-track { background: transparent; }
+::-webkit-scrollbar-thumb { background: var(--color-border); border-radius: 99px; }
+::-webkit-scrollbar-thumb:hover { background: var(--color-muted); }
+
+/* ─── Reduced motion ─────────────────────────────────────────────────────────── */
+
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+  }
+}

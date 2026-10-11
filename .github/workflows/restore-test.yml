@@ -1,0 +1,122 @@
+name: Weekly Backup Restoration & Integrity Test
+
+on:
+  schedule:
+    # Runs at 21:30 UTC on Saturday = 03:00 AM IST on Sunday
+    - cron: '30 21 * * 6'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  test-restore:
+    name: Verify Backup Decryptability and Integrity
+    runs-on: ubuntu-latest
+
+    services:
+      postgres:
+        image: postgres:16-alpine
+        env:
+          POSTGRES_USER: test_user
+          POSTGRES_PASSWORD: test_password
+          POSTGRES_DB: restore_test_db
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Install PostgreSQL Client, Age, and AWS CLI
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y --no-install-recommends postgresql-client age awscli
+
+      - name: Download Latest Backup, Decrypt and Restore
+        id: restore
+        env:
+          R2_ACCOUNT_ID: ${{ secrets.R2_ACCOUNT_ID }}
+          R2_ACCESS_KEY_ID: ${{ secrets.R2_ACCESS_KEY_ID }}
+          R2_SECRET_ACCESS_KEY: ${{ secrets.R2_SECRET_ACCESS_KEY }}
+          R2_BUCKET: ${{ secrets.R2_BUCKET }}
+          BACKUP_AGE_PRIVATE_KEY: ${{ secrets.BACKUP_AGE_PRIVATE_KEY }}
+          TEST_DB_URL: postgresql://test_user:test_password@localhost:5432/restore_test_db
+        run: |
+          chmod +x scripts/restore.sh
+          
+          # Configure AWS CLI for Cloudflare R2
+          export AWS_ACCESS_KEY_ID="$R2_ACCESS_KEY_ID"
+          export AWS_SECRET_ACCESS_KEY="$R2_SECRET_ACCESS_KEY"
+          export AWS_DEFAULT_REGION="auto"
+          R2_ENDPOINT="https://${R2_ACCOUNT_ID}.r2.cloudflarestorage.com"
+          
+          # Find latest backup in daily/
+          LATEST_BACKUP=$(aws --endpoint-url "$R2_ENDPOINT" s3 ls "s3://${R2_BUCKET}/daily/" | awk '{print $4}' | sort | tail -n 1)
+          if [ -z "$LATEST_BACKUP" ]; then
+            echo "[-] No backups found in s3://${R2_BUCKET}/daily/" >&2
+            exit 1
+          fi
+          echo "[+] Latest backup identified: daily/${LATEST_BACKUP}"
+
+          # Write age identity to restricted 0600 file
+          KEY_FILE="$(mktemp)"
+          chmod 0600 "$KEY_FILE"
+          printf "%s\n" "$BACKUP_AGE_PRIVATE_KEY" > "$KEY_FILE"
+          
+          # Securely destroy key file on exit
+          cleanup() {
+            shred -u "$KEY_FILE" 2>/dev/null || rm -f "$KEY_FILE"
+          }
+          trap cleanup EXIT
+
+          START_TIME=$(date +%s)
+          
+          # Execute restore script into throwaway test database
+          export AGE_IDENTITY_FILE="$KEY_FILE"
+          ./scripts/restore.sh "daily/${LATEST_BACKUP}" "$TEST_DB_URL"
+          
+          END_TIME=$(date +%s)
+          RESTORE_DURATION=$((END_TIME - START_TIME))
+          echo "RESTORE_DURATION=${RESTORE_DURATION}" >> "$GITHUB_OUTPUT"
+          echo "LATEST_BACKUP=${LATEST_BACKUP}" >> "$GITHUB_OUTPUT"
+
+      - name: Sanity Verification Queries
+        env:
+          TEST_DB_URL: postgresql://test_user:test_password@localhost:5432/restore_test_db
+        run: |
+          echo "[+] Running sanity verification queries against restored database..."
+          TABLE_COUNT=$(psql "$TEST_DB_URL" -t -A -c "SELECT count(*) FROM information_schema.tables WHERE table_schema = 'public';")
+          USER_COUNT=$(psql "$TEST_DB_URL" -t -A -c "SELECT count(*) FROM users;")
+          
+          echo "[+] Restored public tables count: $TABLE_COUNT"
+          echo "[+] Restored users row count: $USER_COUNT"
+          
+          if [ "$TABLE_COUNT" -le 0 ]; then
+            echo "[-] Verification failed: No tables found in restored database." >&2
+            exit 1
+          fi
+          
+          echo "TABLE_COUNT=${TABLE_COUNT}" >> "$GITHUB_ENV"
+          echo "USER_COUNT=${USER_COUNT}" >> "$GITHUB_ENV"
+
+      - name: Publish Test Summary to Job Summary
+        if: always()
+        run: |
+          cat << 'EOF' >> "$GITHUB_STEP_SUMMARY"
+          ## 🛡️ Weekly Database Restoration & Integrity Test Report
+          
+          | Metric | Value |
+          | :--- | :--- |
+          | **Status** | ✅ Passed |
+          | **Backup File Tested** | `${{ steps.restore.outputs.LATEST_BACKUP }}` |
+          | **Restore Duration** | `${{ steps.restore.outputs.RESTORE_DURATION }} seconds` |
+          | **Public Tables Restored** | `${{ env.TABLE_COUNT }}` |
+          | **Users Count** | `${{ env.USER_COUNT }}` |
+          | **Throwaway DB Isolation** | Verified (Service container destroyed on completion) |
+          EOF

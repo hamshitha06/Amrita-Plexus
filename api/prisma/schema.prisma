@@ -1,0 +1,65 @@
+// This is your Prisma schema file,
+// learn more about it in the docs: https://pris.ly/d/prisma-schema
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+enum VerificationStatus {
+  PENDING
+  VERIFIED
+  SUSPENDED
+}
+
+enum TokenType {
+  REFRESH
+}
+
+model User {
+  id                 String             @id @default(uuid())
+  name               String?
+  collegeEmail       String             @unique
+  roles              String[]           @default(["student"])
+  verificationStatus VerificationStatus @default(VERIFIED)
+  createdAt          DateTime           @default(now())
+  updatedAt          DateTime           @updatedAt
+
+  tokens AuthToken[]
+
+  @@map("users")
+}
+
+model EmailOtp {
+  id        String    @id @default(uuid())
+  email     String
+  codeHash  String
+  expiresAt DateTime
+  attempts  Int       @default(0)
+  usedAt    DateTime?
+  createdAt DateTime  @default(now())
+  ip        String?
+
+  @@index([email, createdAt])
+  @@map("email_otps")
+}
+
+model AuthToken {
+  id        String    @id @default(uuid())
+  userId    String
+  tokenHash String    @unique
+  type      TokenType
+  expiresAt DateTime
+  usedAt    DateTime?
+  createdAt DateTime  @default(now())
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId])
+  @@index([tokenHash])
+  @@map("auth_tokens")
+}
